@@ -2088,27 +2088,154 @@ namespace System {
                 while (hi > lo)
                 {
                     int partitionSize = hi - lo + 1;
-                    if (partitionSize <= IntrospectiveSortUtilities.IntrosortSizeThreshold)
-                    {
-                        if (partitionSize == 1)
-                        {
-                            return;
-                        }
-                        if (partitionSize == 2)
-                        {
-                            SwapIfGreaterWithItems(lo, hi);
-                            return;
-                        }
-                        if (partitionSize == 3)
-                        {
-                            SwapIfGreaterWithItems(lo, hi-1);
-                            SwapIfGreaterWithItems(lo, hi);
-                            SwapIfGreaterWithItems(hi-1, hi);
-                            return;
-                        }
+                    if (partitionSize <= IntrospectiveSortUtilities.IntrosortSizeThreshold) {
+                        switch (partitionSize) {
+                            case 1:
+                                return;
+                            case 2:
+                                SwapIfGreaterWithItems(lo, hi);
+                                return;
+                            case 3:
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo, hi);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                return;
+                            case 4:
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+                                return;
+                            case 5:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
 
-                        InsertionSort(lo, hi);
-                        return;
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+                                return;
+                            case 6:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                return;
+                            case 7:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo, hi);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 2);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                SwapIfGreaterWithItems(lo + 3, hi);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+                                return;
+                            case 8:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 1);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+
+                                SwapIfGreaterWithItems(lo, hi - 3);
+                                SwapIfGreaterWithItems(lo + 3, hi);
+                                SwapIfGreaterWithItems(lo + 1, hi - 2);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 3);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 3);
+                                return;
+                            case 9:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 4, hi - 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 3);
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(hi - 4, hi - 2);
+                                //11
+                                SwapIfGreaterWithItems(lo, hi - 4);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 4);
+                                SwapIfGreaterWithItems(lo + 3, hi - 3);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 4, hi);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 4);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+                                //19
+                                SwapIfGreaterWithItems(hi - 3, hi);
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 3, hi - 4);
+                                SwapIfGreaterWithItems(hi - 3, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                //25
+                                return;
+                            default:
+                                InsertionSort(lo, hi);
+                                return;
+                        }
                     }
 
                     if (depthLimit == 0)
@@ -2405,27 +2532,154 @@ namespace System {
                 while (hi > lo)
                 {
                     int partitionSize = hi - lo + 1;
-                    if (partitionSize <= IntrospectiveSortUtilities.IntrosortSizeThreshold)
-                    {
-                        if (partitionSize == 1)
-                        {
-                            return;
-                        }
-                        if (partitionSize == 2)
-                        {
-                            SwapIfGreaterWithItems(lo, hi);
-                            return;
-                        }
-                        if (partitionSize == 3)
-                        {
-                            SwapIfGreaterWithItems(lo, hi-1);
-                            SwapIfGreaterWithItems(lo, hi);
-                            SwapIfGreaterWithItems(hi-1, hi);
-                            return;
-                        }
+                    if (partitionSize <= IntrospectiveSortUtilities.IntrosortSizeThreshold) {
+                        switch (partitionSize) {
+                            case 1:
+                                return;
+                            case 2:
+                                SwapIfGreaterWithItems(lo, hi);
+                                return;
+                            case 3:
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo, hi);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                return;
+                            case 4:
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+                                return;
+                            case 5:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
 
-                        InsertionSort(lo, hi);
-                        return;
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 1);
+
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+                                return;
+                            case 6:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+
+                                SwapIfGreaterWithItems(lo, hi - 1);
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                return;
+                            case 7:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo, hi);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 2);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+                                SwapIfGreaterWithItems(lo + 3, hi);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+                                return;
+                            case 8:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 1);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+
+                                SwapIfGreaterWithItems(lo, hi - 3);
+                                SwapIfGreaterWithItems(lo + 3, hi);
+                                SwapIfGreaterWithItems(lo + 1, hi - 2);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+                                SwapIfGreaterWithItems(lo + 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 3);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 3, hi - 3);
+                                return;
+                            case 9:
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 2, lo + 3);
+                                SwapIfGreaterWithItems(hi - 4, hi - 3);
+                                SwapIfGreaterWithItems(hi - 2, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 3);
+                                SwapIfGreaterWithItems(hi - 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, hi - 3);
+                                SwapIfGreaterWithItems(lo + 3, hi - 1);
+
+                                SwapIfGreaterWithItems(lo + 1, hi);
+                                SwapIfGreaterWithItems(lo, lo + 2);
+                                SwapIfGreaterWithItems(hi - 4, hi - 2);
+                                //11
+                                SwapIfGreaterWithItems(lo, hi - 4);
+                                SwapIfGreaterWithItems(lo + 2, hi - 2);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 4);
+                                SwapIfGreaterWithItems(lo + 3, hi - 3);
+
+                                SwapIfGreaterWithItems(lo + 1, lo + 2);
+                                SwapIfGreaterWithItems(hi - 4, hi);
+
+                                SwapIfGreaterWithItems(lo + 2, hi - 4);
+                                SwapIfGreaterWithItems(hi - 2, hi);
+                                //19
+                                SwapIfGreaterWithItems(hi - 3, hi);
+                                SwapIfGreaterWithItems(lo + 3, hi - 2);
+
+                                SwapIfGreaterWithItems(lo, lo + 1);
+                                SwapIfGreaterWithItems(lo + 3, hi - 4);
+                                SwapIfGreaterWithItems(hi - 3, hi - 2);
+                                SwapIfGreaterWithItems(hi - 1, hi);
+                                //25
+                                return;
+                            default:
+                                InsertionSort(lo, hi);
+                                return;
+                        }
                     }
 
                     if (depthLimit == 0)

@@ -160,25 +160,154 @@ public:
             int partitionSize = hi - lo + 1;
             if(partitionSize <= introsortSizeThreshold)
             {
-                if (partitionSize == 1)
-                {
-                    return;
-                }
-                if (partitionSize == 2)
-                {
-                    SwapIfGreaterWithItems(keys, items, lo, hi);
-                    return;
-                }
-                if (partitionSize == 3)
-                {
-                    SwapIfGreaterWithItems(keys, items, lo, hi-1);
-                    SwapIfGreaterWithItems(keys, items, lo, hi);
-                    SwapIfGreaterWithItems(keys, items, hi-1, hi);
-                    return;
-                }
-                
-                InsertionSort(keys, items, lo, hi);
-                return;
+				switch (partitionSize)
+				{
+				case 1:
+					return;
+				case 2:
+					SwapIfGreaterWithItems(keys, items, lo, hi);
+					return;
+				case 3:
+					SwapIfGreaterWithItems(keys, items, lo, hi - 1);
+					SwapIfGreaterWithItems(keys, items, lo, hi);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+					return;
+				case 4:
+					SwapIfGreaterWithItems(keys, items, lo, hi - 1);
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi);
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 1);
+					return;
+				case 5:
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 2);
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 1);
+					return;
+				case 6:
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 2);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 2);
+
+					SwapIfGreaterWithItems(keys, items, lo, hi - 1);
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi);
+
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 2);
+					return;
+				case 7:
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo, hi);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 2);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 2);
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 2);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 2);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 2);
+					return;
+				case 8:
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 3, hi - 2);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 2);
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 3, hi - 1);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo, hi - 3);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi);
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 2);
+
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 2);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 3);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 3);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 3);
+					return;
+				case 9:
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 2, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 4, hi - 3);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 3);
+					SwapIfGreaterWithItems(keys, items, hi - 3, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi - 3);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 1);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, hi);
+					SwapIfGreaterWithItems(keys, items, lo, lo + 2);
+					SwapIfGreaterWithItems(keys, items, hi - 4, hi - 2);
+					//11
+					SwapIfGreaterWithItems(keys, items, lo, hi - 4);
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 2);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 4);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 3);
+
+					SwapIfGreaterWithItems(keys, items, lo + 1, lo + 2);
+					SwapIfGreaterWithItems(keys, items, hi - 4, hi);
+
+					SwapIfGreaterWithItems(keys, items, lo + 2, hi - 4);
+					SwapIfGreaterWithItems(keys, items, hi - 2, hi);
+					//19
+					SwapIfGreaterWithItems(keys, items, hi - 3, hi);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 2);
+
+					SwapIfGreaterWithItems(keys, items, lo, lo + 1);
+					SwapIfGreaterWithItems(keys, items, lo + 3, hi - 4);
+					SwapIfGreaterWithItems(keys, items, hi - 3, hi - 2);
+					SwapIfGreaterWithItems(keys, items, hi - 1, hi);
+					//25
+					return;
+				default:
+					InsertionSort(keys, items, lo, hi);
+					return;
+				}
             }
 
             if (depthLimit == 0)
