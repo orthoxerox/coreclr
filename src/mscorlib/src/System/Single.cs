@@ -218,6 +218,25 @@ namespace System {
         private static float Parse(String s, NumberStyles style, NumberFormatInfo info) {
             return Number.ParseSingle(s, style, info);
         }
+        
+        public static Single? TryParse(String s) {
+            Single result;
+            if (TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, NumberFormatInfo.CurrentInfo, out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
+
+        public static Single? TryParse(String s, NumberStyles style, IFormatProvider provider) {
+            NumberFormatInfo.ValidateParseStyleFloatingPoint(style);
+            Single result;
+            if (TryParse(s, style, NumberFormatInfo.GetInstance(provider), out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
 
         public static Boolean TryParse(String s, out Single result) {
             return TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, NumberFormatInfo.CurrentInfo, out result);
