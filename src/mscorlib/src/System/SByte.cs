@@ -151,6 +151,27 @@ namespace System {
             if (i < MinValue || i > MaxValue) throw new OverflowException(Environment.GetResourceString("Overflow_SByte"));
             return (sbyte)i;
         }
+        
+        [CLSCompliant(false)]
+        public static SByte? TryParse(String s) {
+            SByte result;
+            if (TryParse(s, NumberStyles.Integer, NumberFormatInfo.CurrentInfo, out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
+
+        [CLSCompliant(false)]
+        public static SByte? TryParse(String s, NumberStyles style, IFormatProvider provider) {
+            NumberFormatInfo.ValidateParseStyleInteger(style);
+            SByte result;
+            if (TryParse(s, style, NumberFormatInfo.GetInstance(provider), out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
 
         [CLSCompliant(false)]
         public static bool TryParse(String s, out SByte result) {
