@@ -521,6 +521,25 @@ namespace System {
             NumberFormatInfo.ValidateParseStyleFloatingPoint(style);
             return Number.ParseDecimal(s, style, NumberFormatInfo.GetInstance(provider));
         }
+        
+        public static Decimal? TryParse(String s) {
+            Decimal result;
+            if (Number.TryParseDecimal(s, NumberStyles.Number, NumberFormatInfo.CurrentInfo, out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
+
+        public static Decimal? TryParse(String s, NumberStyles style, IFormatProvider provider) {
+            NumberFormatInfo.ValidateParseStyleFloatingPoint(style);
+            Decimal result;
+            if (Number.TryParseDecimal(s, style, NumberFormatInfo.GetInstance(provider), out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
     
         public static Boolean TryParse(String s, out Decimal result) {
             return Number.TryParseDecimal(s, NumberStyles.Number, NumberFormatInfo.CurrentInfo, out result);
