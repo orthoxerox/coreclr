@@ -114,6 +114,25 @@ namespace System {
             if (i < MinValue || i > MaxValue) throw new OverflowException(Environment.GetResourceString("Overflow_Byte"));
             return (byte)i;
         }
+        
+        public static Byte? TryParse(String s) {
+            Byte result;
+            if (TryParse(s, NumberStyles.Integer, NumberFormatInfo.CurrentInfo, out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
+
+        public static Byte? TryParse(String s, NumberStyles style, IFormatProvider provider) {
+            NumberFormatInfo.ValidateParseStyleInteger(style);
+            Byte result;
+            if (TryParse(s, style, NumberFormatInfo.GetInstance(provider), out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
 
         public static bool TryParse(String s, out Byte result) {
             return TryParse(s, NumberStyles.Integer, NumberFormatInfo.CurrentInfo, out result);
