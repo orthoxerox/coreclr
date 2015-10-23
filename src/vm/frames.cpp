@@ -45,6 +45,8 @@
 #include "interpreter.h"
 #endif // FEATURE_INTERPRETER
 
+#include "argdestination.h"
+
 #if CHECK_APP_DOMAIN_LEAKS
 #define CHECK_APP_DOMAIN    GC_CALL_CHECK_APP_DOMAIN
 #else
@@ -477,19 +479,23 @@ VOID Frame::Pop(Thread *pThread)
              (*m_Next->GetGSCookiePtr() == GetProcessGSCookie()));
 
     pThread->SetFrame(m_Next);
+    m_Next = NULL;
 }
 
-#ifdef FEATURE_PAL
-Frame::~Frame()
-{
-    // When the frame is destroyed, make sure it is no longer in the
-    // frame chain managed by the Thread.
-    Thread* pThread = GetThread();
-    if (pThread != NULL && pThread->GetFrame() == this)
+#ifdef FEATURE_PAL     
+Frame::~Frame()        
+{      
+    if (m_Next != NULL)
     {
-        Pop(pThread);
+        // When the frame is destroyed, make sure it is no longer in the
+        // frame chain managed by the Thread.
+        Thread* pThread = GetThread();
+        if (pThread != NULL && pThread->GetFrame() == this)
+        {
+            Pop(pThread);
+        }
     }
-}
+}      
 #endif // FEATURE_PAL
 
 //-----------------------------------------------------------------------
@@ -1274,7 +1280,8 @@ void TransitionFrame::PromoteCallerStackHelper(promote_func* fn, ScanContext* sc
     int argOffset;
     while ((argOffset = argit.GetNextOffset()) != TransitionBlock::InvalidOffset)
     {
-        pmsig->GcScanRoots(dac_cast<PTR_VOID>(pTransitionBlock + argOffset), fn, sc);
+        ArgDestination argDest(dac_cast<PTR_VOID>(pTransitionBlock), argOffset, argit.GetArgLocDescForStructInRegs());
+        pmsig->GcScanRoots(&argDest, fn, sc);
     }
 }
 
@@ -1998,7 +2005,7 @@ VOID InlinedCallFrame::Init()
     m_pCallerReturnAddress = NULL;
 }
 
-#ifdef _WIN64
+#if defined(_WIN64) && !defined(FEATURE_PAL)
 
 EXTERN_C void PInvokeStubForHostInner(DWORD dwStackSize, LPVOID pStackFrame, LPVOID pTarget);
 
@@ -2077,8 +2084,7 @@ void __stdcall PInvokeStubForHostWorker(DWORD dwStackSize, LPVOID pStackFrame, L
         PInvokeStubForHostInner(dwStackSize, pStackFrame, pTarget);
     }
 }
-
-#endif // _WIN64
+#endif // _WIN64 && !FEATURE_PAL
 
 
 

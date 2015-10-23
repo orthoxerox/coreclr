@@ -314,6 +314,10 @@ namespace CorUnix
         DWORD m_dwLwpId;
         pthread_t m_pthreadSelf;        
 
+#if HAVE_MACH_THREADS
+        mach_port_t m_machPortSelf;
+#endif 
+
         //
         // Start info
         //
@@ -337,6 +341,11 @@ namespace CorUnix
         bool m_fStartItemsInitialized;
         bool m_fStartStatus;
         bool m_fStartStatusSet;
+
+        // Base address of the stack of this thread
+        void* m_stackBase;
+        // Limit address of the stack of this thread
+        void* m_stackLimit;
 
         // The default stack size of a newly created thread (currently 256KB)
         // when the dwStackSize paramter of PAL_CreateThread()
@@ -394,6 +403,9 @@ namespace CorUnix
             m_threadId(0),
             m_dwLwpId(0),
             m_pthreadSelf(0),
+#if HAVE_MACH_THREADS
+            m_machPortSelf(0),
+#endif            
             m_lpStartAddress(NULL),
             m_lpStartParameter(NULL),
             m_bCreateSuspended(FALSE),
@@ -401,7 +413,9 @@ namespace CorUnix
             m_eThreadType(UserCreatedThread),
             m_fStartItemsInitialized(FALSE),
             m_fStartStatus(FALSE),
-            m_fStartStatusSet(FALSE)
+            m_fStartStatusSet(FALSE),
+            m_stackBase(NULL),
+            m_stackLimit(NULL)
 #ifdef FEATURE_PAL_SXS
           , m_fInPal(TRUE)
 #endif // FEATURE_PAL_SXS
@@ -548,6 +562,16 @@ namespace CorUnix
             return m_pthreadSelf;
         };
 
+#if HAVE_MACH_THREADS
+        mach_port_t
+        GetMachPortSelf(
+            void
+            )
+        {
+            return m_machPortSelf;
+        };
+#endif
+
         LPTHREAD_START_ROUTINE
         GetStartAddress(
             void
@@ -627,6 +651,20 @@ namespace CorUnix
 
         void
         ReleaseThreadReference(
+            void
+            );
+
+        // Get base address of this thread's stack
+        // Can be called only for the current thread.
+        void *
+        GetStackBase(
+            void
+            );
+
+        // Get limit address of this thread's stack
+        // Can be called only for the current thread.
+        void *
+        GetStackLimit(
             void
             );
         
@@ -745,6 +783,9 @@ WaitForEndingThreads(
     );
 
 extern int free_threads_spinlock;
+
+extern PAL_ActivationFunction g_activationFunction;
+extern PAL_SafeActivationCheckFunction g_safeActivationCheckFunction;
 
 /*++
 Macro:

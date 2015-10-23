@@ -9,7 +9,7 @@
   
   <!-- Build Tools Versions -->
   <PropertyGroup>
-    <BuildToolsVersion>1.0.25-prerelease-00079</BuildToolsVersion>
+    <BuildToolsVersion>1.0.25-prerelease-00105</BuildToolsVersion>
     <BuildToolsCoreCLRVersion>1.0.2-prerelease</BuildToolsCoreCLRVersion>
     <DnxVersion Condition="'$(OsEnvironment)'!='Unix'">1.0.0-beta5-12101</DnxVersion>
     <DnxVersion Condition="'$(OsEnvironment)'=='Unix'">1.0.0-beta5-12101</DnxVersion>
@@ -68,6 +68,21 @@
     <DnuRestoreCommand>$(DnuRestoreCommand) --packages "$(PackagesDir.TrimEnd('\\'))"</DnuRestoreCommand>
     <DnuRestoreCommand Condition="'$(LockDependencies)' == 'true'">$(DnuRestoreCommand) --lock</DnuRestoreCommand>
     
+  </PropertyGroup>
+  
+  <!-- Which tests shall we build? Default: Priority 0 tests.
+    At the command-line, the user can specify /p:CLRTestPriorityToBuild=666 (for example), and
+    all tests with CLRTestPriority 666,..., 1 AND 0 will build. 
+    
+    Consequently, specifying CLRTestPriorityToBuild=1 will build all tests with CLRTestPriority 1 and 0.
+    
+    CLRTestPriority = 0 will build only priority 0 cases. 
+  
+    In other words, the CLRTestPriority cases of 0 are *essential* testcases. The higher the value,
+    the less priority we give them.
+   -->
+  <PropertyGroup>
+    <CLRTestPriorityToBuild>0</CLRTestPriorityToBuild>
   </PropertyGroup>
   
 </Project>

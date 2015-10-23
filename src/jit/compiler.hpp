@@ -651,7 +651,10 @@ bool   Compiler::VarTypeIsMultiByteAndCanEnreg(var_types type,
     if (type == TYP_STRUCT)
     {
         size = info.compCompHnd->getClassSize(typeClass);
-
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+        // Account for the classification of the struct.
+        result = IsRegisterPassable(typeClass);
+#else // !FEATURE_UNIX_AMD64_STRUCT_PASSING
         switch(size)
         {
             case 1:
@@ -664,6 +667,7 @@ bool   Compiler::VarTypeIsMultiByteAndCanEnreg(var_types type,
             default:
                 break;
         }
+#endif // !FEATURE_UNIX_AMD64_STRUCT_PASSING
     }
     else
     {
@@ -2268,8 +2272,10 @@ int                 Compiler::lvaFrameAddress(int varNum, bool * pFPbased)
         if (lvaDoneFrameLayout > REGALLOC_FRAME_LAYOUT && !varDsc->lvOnFrame)
         {
 #ifdef _TARGET_AMD64_
-            // On amd64, every param has a stack location.
+            // On amd64, every param has a stack location, except on Unix-like systems.
+#ifndef FEATURE_UNIX_AMD64_STRUCT_PASSING
             assert(varDsc->lvIsParam);
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
 #elif defined(_TARGET_X86_) && !defined(LEGACY_BACKEND)
             // For !LEGACY_BACKEND on x86, a stack parameter that is enregistered will have a stack location. 
             assert(varDsc->lvIsParam && !varDsc->lvIsRegArg);
@@ -2589,6 +2595,8 @@ var_types Compiler::mangleVarArgsType(var_types type)
     return type;
 }
 
+// For CORECLR there is no vararg on System V systems.
+#if FEATURE_VARARG
 inline regNumber Compiler::getCallArgIntRegister(regNumber floatReg)
 {
 #ifdef _TARGET_AMD64_
@@ -2630,10 +2638,11 @@ inline regNumber Compiler::getCallArgFloatRegister(regNumber intReg)
     }
 #else  // !_TARGET_AMD64_
     // How will float args be passed for RyuJIT/x86?
-    NYI("getCallArgIntRegister for RyuJIT/x86");
+    NYI("getCallArgFloatRegister for RyuJIT/x86");
     return REG_NA;
 #endif // !_TARGET_AMD64_
 }
+#endif // FEATURE_VARARG
 
 /*
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
@@ -2797,6 +2806,8 @@ Compiler::fgWalkResult  Compiler::fgWalkTreePost(GenTreePtr    *pTree,
  * Has this block been added to throw an inlined exception
  * Returns true if the block was added to throw one of:
  *    range-check exception
+ *    argument exception (used by feature SIMD)
+ *    argument range-check exception (used by feature SIMD)
  *    divide by zero exception  (Not used on X86/X64)
  *    null reference exception (Not currently used)
  *    overflow exception
@@ -2834,7 +2845,12 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
         {
             return add->acdKind == SCK_RNGCHK_FAIL ||
                    add->acdKind == SCK_DIV_BY_ZERO ||
-                   add->acdKind == SCK_OVERFLOW;
+                   add->acdKind == SCK_OVERFLOW
+#ifndef RYUJIT_CTPBUILD
+                   || add->acdKind == SCK_ARG_EXCPN
+                   || add->acdKind == SCK_ARG_RNG_EXCPN
+#endif //!RYUJIT_CTPBUILD
+                   ;
         }
     }
 
@@ -2855,6 +2871,17 @@ unsigned            Compiler::fgThrowHlpBlkStkLevel(BasicBlock *block)
     {
         if  (block == add->acdDstBlk)
         {
+            // Compute assert cond separately as assert macro cannot have conditional compilation directives.
+            bool cond = (add->acdKind == SCK_RNGCHK_FAIL ||
+                         add->acdKind == SCK_DIV_BY_ZERO ||
+                         add->acdKind == SCK_OVERFLOW
+#ifndef RYUJIT_CTPBUILD
+                         || add->acdKind == SCK_ARG_EXCPN
+                         || add->acdKind == SCK_ARG_RNG_EXCPN
+#endif //!RYUJIT_CTPBUILD
+                        );
+            assert(cond);
+
             assert(add->acdKind == SCK_RNGCHK_FAIL ||
                    add->acdKind == SCK_DIV_BY_ZERO ||
                    add->acdKind == SCK_OVERFLOW);

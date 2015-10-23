@@ -23,6 +23,7 @@ Abstract:
 #include "pal/file.hpp"
 #include "shmfilelockmgr.hpp"
 #include "pal/malloc.hpp"
+#include "pal/stackstring.hpp"
 
 #include "pal/palinternal.h"
 #include "pal/dbgmsg.h"
@@ -43,6 +44,8 @@ Abstract:
 using namespace CorUnix;
 
 SET_DEFAULT_DEBUG_CHANNEL(FILE);
+
+int MaxWCharToAcpLengthFactor = 3;
 
 PAL_ERROR
 InternalSetFilePointerForUnixFd(
@@ -974,8 +977,10 @@ CreateFileW(
 {
     CPalThread *pThread;
     PAL_ERROR palError = NO_ERROR;
-    char    name[MAX_LONGPATH];
-    int     size;
+    PathCharString namePathString;
+    char * name;
+    int size;
+    int length = 0;
     HANDLE  hRet = INVALID_HANDLE_VALUE;
 
     PERF_ENTRY(CreateFileW);
@@ -988,8 +993,22 @@ CreateFileW(
 
     pThread = InternalGetCurrentThread();
 
-    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, MAX_LONGPATH,
+    if (lpFileName != NULL)
+    {
+        length = (PAL_wcslen(lpFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    name = namePathString.OpenStringBuffer(length);
+    if (NULL == name)
+    {
+        palError = ERROR_NOT_ENOUGH_MEMORY;
+        goto done;
+    }
+    
+    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, length,
                                 NULL, NULL );
+    namePathString.CloseBuffer(size);    
+
     if( size == 0 )
     {
         DWORD dwLastError = GetLastError();
@@ -1025,9 +1044,8 @@ CreateFileW(
     // entry to the function
     //
 
-    pThread->SetLastError(palError);
-
 done:
+	pThread->SetLastError(palError);
     LOGEXIT( "CreateFileW returns HANDLE %p\n", hRet );
     PERF_EXIT(CreateFileW);
     return hRet;
@@ -1053,10 +1071,12 @@ CopyFileW(
       IN BOOL bFailIfExists)
 {
     CPalThread *pThread;
-    char    source[MAX_PATH];
-    char    dest[MAX_PATH];
-    int     src_size,dest_size;
-    BOOL        bRet = FALSE;
+    PathCharString sourcePathString;
+    PathCharString destPathString;
+    char * source;
+    char * dest;
+    int src_size, dest_size, length = 0;
+    BOOL bRet = FALSE;
 
     PERF_ENTRY(CopyFileW);
     ENTRY("CopyFileW(lpExistingFileName=%p (%S), lpNewFileName=%p (%S), bFailIfExists=%d)\n",
@@ -1066,14 +1086,28 @@ CopyFileW(
           lpNewFileName?lpNewFileName:W16_NULLSTRING, bFailIfExists);
 
     pThread = InternalGetCurrentThread();
-    src_size = WideCharToMultiByte( CP_ACP, 0, lpExistingFileName, -1, source, MAX_PATH,
+    if (lpExistingFileName != NULL)
+    {
+        length = (PAL_wcslen(lpExistingFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    source = sourcePathString.OpenStringBuffer(length);
+    if (NULL == source)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+
+    src_size = WideCharToMultiByte( CP_ACP, 0, lpExistingFileName, -1, source, length,
                                 NULL, NULL );
+    sourcePathString.CloseBuffer(src_size);
+    
     if( src_size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpExistingFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpExistingFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1084,14 +1118,28 @@ CopyFileW(
         goto done;
     }
 
-    dest_size = WideCharToMultiByte( CP_ACP, 0, lpNewFileName, -1, dest, MAX_PATH,
+    length = 0;
+    if (lpNewFileName != NULL)
+    {
+        length = (PAL_wcslen(lpNewFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    dest = destPathString.OpenStringBuffer(length);
+    if (NULL == dest)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+    dest_size = WideCharToMultiByte( CP_ACP, 0, lpNewFileName, -1, dest, length,
                                 NULL, NULL );
+    destPathString.CloseBuffer(dest_size);
+    
     if( dest_size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpNewFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpNewFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1128,7 +1176,9 @@ DeleteFileA(
     int     result;
     BOOL    bRet = FALSE;
     DWORD   dwLastError = 0;
-    char    lpUnixFileName[MAX_PATH];
+    char * lpUnixFileName;
+    int length;
+    PathCharString lpUnixFileNamePS;
     LPSTR lpFullUnixFileName = NULL;
     DWORD cchFullUnixFileName = MAX_LONGPATH+1;// InternalCanonicalizeRealPath requires this to be atleast PATH_MAX
 
@@ -1136,14 +1186,16 @@ DeleteFileA(
     ENTRY("DeleteFileA(lpFileName=%p (%s))\n", lpFileName?lpFileName:"NULL", lpFileName?lpFileName:"NULL");
 
     pThread = InternalGetCurrentThread();
-    if (strlen(lpFileName) >= MAX_PATH)
+    length = strlen(lpFileName);
+
+    lpUnixFileName = lpUnixFileNamePS.OpenStringBuffer(length);
+    if (NULL == lpUnixFileName)
     {
-        WARN("lpFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
-        pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        palError = ERROR_NOT_ENOUGH_MEMORY;
         goto done;
     }
-
-    strcpy_s( lpUnixFileName, sizeof(lpUnixFileName), lpFileName);
+    strcpy_s( lpUnixFileName, lpUnixFileNamePS.GetSizeOf(), lpFileName);
+    lpUnixFileNamePS.CloseBuffer(length);
     
     FILEDosToUnixPathA( lpUnixFileName );
     
@@ -1241,7 +1293,9 @@ DeleteFileW(
 {
     CPalThread *pThread;
     int  size;
-    char name[MAX_PATH];
+    PathCharString namePS;
+    char * name;
+    int length = 0;
     BOOL bRet = FALSE;
 
     PERF_ENTRY(DeleteFileW);
@@ -1250,14 +1304,29 @@ DeleteFileW(
       lpFileName?lpFileName:W16_NULLSTRING);
 
     pThread = InternalGetCurrentThread();
-    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, MAX_PATH,
+    
+    if (lpFileName != NULL)
+    {
+        length = (PAL_wcslen(lpFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    name = namePS.OpenStringBuffer(length);
+    if (NULL == name)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+
+    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, length,
                                 NULL, NULL );
+    namePS.CloseBuffer(size);
+    
     if( size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpFilePathName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpFilePathName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1354,8 +1423,11 @@ MoveFileExA(
 {
     CPalThread *pThread;
     int   result;
-    char  source[MAX_PATH];
-    char  dest[MAX_PATH];
+    int length = 0;
+    PathCharString sourcePS;
+    PathCharString destPS;
+    char * source;
+    char * dest;
     BOOL  bRet = TRUE;
     DWORD dwLastError = 0;
 
@@ -1376,26 +1448,30 @@ MoveFileExA(
         goto done;
     }
 
-    if (strlen(lpExistingFileName) >= MAX_PATH)
+    length = strlen(lpExistingFileName);
+    
+    source = sourcePS.OpenStringBuffer(length);
+    if (NULL == source)
     {
-        WARN("lpExistingFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
-        pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        dwLastError = ERROR_NOT_ENOUGH_MEMORY;
         goto done;
     }
+    strcpy_s( source, sourcePS.GetSizeOf(), lpExistingFileName);
+    sourcePS.CloseBuffer(length);
     
-    strcpy_s( source, sizeof(source), lpExistingFileName);
-
     FILEDosToUnixPathA( source );
 
-    if (strlen(lpNewFileName) >= MAX_PATH)
+    length = strlen(lpNewFileName);
+    
+    dest = destPS.OpenStringBuffer(length);
+    if (NULL == dest)
     {
-        WARN("lpNewFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
-        pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        dwLastError = ERROR_NOT_ENOUGH_MEMORY;
         goto done;
     }
+    strcpy_s( dest, destPS.GetSizeOf(), lpNewFileName);
+    destPS.CloseBuffer(length);
     
-    strcpy_s( dest, sizeof(dest), lpNewFileName);
-
     FILEDosToUnixPathA( dest );
 
     if ( !FILEGetFileNameFromSymLink(source))
@@ -1527,8 +1603,11 @@ MoveFileExW(
         IN DWORD dwFlags)
 {
     CPalThread *pThread;
-    char    source[MAX_PATH];
-    char    dest[MAX_PATH];
+    PathCharString sourcePS;
+    PathCharString destPS;
+    char * source;
+    char * dest;
+    int length = 0;
     int     src_size,dest_size;
     BOOL        bRet = FALSE;
 
@@ -1540,14 +1619,27 @@ MoveFileExW(
           lpNewFileName?lpNewFileName:W16_NULLSTRING, dwFlags);
 
     pThread = InternalGetCurrentThread();
-    src_size = WideCharToMultiByte( CP_ACP, 0, lpExistingFileName, -1, source, MAX_PATH,
+    
+    if (lpExistingFileName != NULL)
+    {
+        length = (PAL_wcslen(lpExistingFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    source = sourcePS.OpenStringBuffer(length);
+    if (NULL == source)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+    src_size = WideCharToMultiByte( CP_ACP, 0, lpExistingFileName, -1, source, length,
                                 NULL, NULL );
+    sourcePS.CloseBuffer(src_size);
     if( src_size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpExistingFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpExistingFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1558,14 +1650,28 @@ MoveFileExW(
         goto done;
     }
 
-    dest_size = WideCharToMultiByte( CP_ACP, 0, lpNewFileName, -1, dest, MAX_PATH,
+    length = 0;
+    if (lpNewFileName != NULL)
+    {
+        length = (PAL_wcslen(lpNewFileName)+1) * MaxWCharToAcpLengthFactor;
+    }
+    
+    dest = destPS.OpenStringBuffer(length);
+    if (NULL == dest)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+    dest_size = WideCharToMultiByte( CP_ACP, 0, lpNewFileName, -1, dest, length,
                                 NULL, NULL );
+    destPS.CloseBuffer(dest_size);
+    
     if( dest_size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpNewFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpNewFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1618,7 +1724,9 @@ GetFileAttributesA(
     struct stat stat_data;
     DWORD dwAttr = 0;
     DWORD dwLastError = 0;
-    CHAR UnixFileName[MAX_PATH + 1];
+    CHAR * UnixFileName;
+    int length = 0;
+    PathCharString UnixFileNamePS;
 
     PERF_ENTRY(GetFileAttributesA);
     ENTRY("GetFileAttributesA(lpFileName=%p (%s))\n", lpFileName?lpFileName:"NULL", lpFileName?lpFileName:"NULL");
@@ -1630,15 +1738,17 @@ GetFileAttributesA(
         goto done;
     }
 
-    if (strlen(lpFileName) >= MAX_PATH) 
+    length = strlen(lpFileName);
+    
+    UnixFileName = UnixFileNamePS.OpenStringBuffer(length);
+    if (NULL == UnixFileName)
     {
-        WARN("lpFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
-        dwLastError = ERROR_FILENAME_EXCED_RANGE;
+        dwLastError = ERROR_NOT_ENOUGH_MEMORY;
         goto done;
     }
+    strcpy_s( UnixFileName, UnixFileNamePS.GetSizeOf(), lpFileName );
+    UnixFileNamePS.CloseBuffer(length);
     
-    strcpy_s( UnixFileName, sizeof(UnixFileName), lpFileName );
-
     FILEDosToUnixPathA( UnixFileName );
 
     if ( stat(UnixFileName, &stat_data) != 0 )
@@ -1701,7 +1811,9 @@ GetFileAttributesW(
 {
     CPalThread *pThread;
     int   size;
-    char  filename[MAX_PATH];
+    PathCharString filenamePS;
+    int length = 0;
+    char * filename;
     DWORD dwRet = (DWORD) -1;
 
     PERF_ENTRY(GetFileAttributesW);
@@ -1716,14 +1828,23 @@ GetFileAttributesW(
         goto done;
     }
     
-    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, filename, MAX_PATH,
+    length = (PAL_wcslen(lpFileName)+1) * MaxWCharToAcpLengthFactor;
+    filename = filenamePS.OpenStringBuffer(length);
+    if (NULL == filename)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, filename, length,
                                 NULL, NULL );
+    filenamePS.CloseBuffer(size);
+    
     if( size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -1761,7 +1882,9 @@ GetFileAttributesExW(
 
     struct stat stat_data;
 
-    char name[MAX_PATH];
+    char * name;
+    PathCharString namePS;
+    int length = 0;
     int  size;
 
     PERF_ENTRY(GetFileAttributesExW);
@@ -1790,14 +1913,23 @@ GetFileAttributesExW(
         goto done;
     }
     
-    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, MAX_PATH,
+    length = (PAL_wcslen(lpFileName)+1) * MaxWCharToAcpLengthFactor;
+    name = namePS.OpenStringBuffer(length);
+    if (NULL == name)
+    {
+        dwLastError = ERROR_NOT_ENOUGH_MEMORY;
+        goto done;
+    }
+    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, length,
                                 NULL, NULL );
+    namePS.CloseBuffer(size);
+    
     if( size == 0 )
     {
         dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             dwLastError = ERROR_FILENAME_EXCED_RANGE;
         }
         else
@@ -1871,7 +2003,9 @@ SetFileAttributesW(
            IN DWORD dwFileAttributes)
 {
     CPalThread *pThread;
-    char name[MAX_PATH];
+    char * name;
+    PathCharString namePS;
+    int length = 0;
     int  size;
 
     DWORD dwLastError = 0;
@@ -1889,14 +2023,23 @@ SetFileAttributesW(
         goto done;
     }
     
-    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, MAX_PATH,
+    length = (PAL_wcslen(lpFileName)+1) * MaxWCharToAcpLengthFactor;
+    name = namePS.OpenStringBuffer(length);
+    if (NULL == name)
+    {
+        dwLastError = ERROR_NOT_ENOUGH_MEMORY;
+        goto done;
+    }
+    size = WideCharToMultiByte( CP_ACP, 0, lpFileName, -1, name, length,
                                 NULL, NULL );
+    namePS.CloseBuffer(size);
+    
     if( size == 0 )
     {
         dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpFileName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             dwLastError = ERROR_FILENAME_EXCED_RANGE;
         }
         else
@@ -3367,8 +3510,11 @@ GetTempFileNameA(
                  OUT LPSTR lpTempFileName)
 {
     CPalThread *pThread;
-    CHAR    full_name[ MAX_PATH + 1 ];
-    CHAR    file_template[ MAX_PATH + 1 ];
+    CHAR * full_name;
+    PathCharString full_namePS;
+    int length;
+    CHAR * file_template;
+    PathCharString file_templatePS;
     CHAR    chLastPathNameChar;
  
     HANDLE  hTempFile;
@@ -3407,34 +3553,50 @@ GetTempFileNameA(
         goto done;
     }
 
-    if ( strlen( lpPathName ) + MAX_SEEDSIZE + MAX_PREFIX >= MAX_PATH ) 
+    if ( strlen( lpPathName ) + MAX_SEEDSIZE + MAX_PREFIX >= MAX_LONGPATH ) 
     {
-        WARN( "File names larger than MAX_PATH (%d)!\n", MAX_PATH );
+        WARN( "File names larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH );
         pThread->SetLastError( ERROR_FILENAME_EXCED_RANGE );
         goto done;
     }
 
+    length = strlen(lpPathName) + MAX_SEEDSIZE + MAX_PREFIX + 10;
+    file_template = file_templatePS.OpenStringBuffer(length);
+    if (NULL == file_template)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
     *file_template = '\0';
-    strcat_s( file_template, sizeof(file_template), lpPathName );
+    strcat_s( file_template, file_templatePS.GetSizeOf(), lpPathName );
+    file_templatePS.CloseBuffer(length);
 
     chLastPathNameChar = file_template[strlen(file_template)-1];
     if (chLastPathNameChar != '\\' && chLastPathNameChar != '/')
     {
-        strcat_s( file_template, sizeof(file_template), "\\" );
+        strcat_s( file_template, file_templatePS.GetSizeOf(), "\\" );
     }
     
     if ( lpPrefixString )
     {
-        strncat_s( file_template, sizeof(file_template), lpPrefixString, MAX_PREFIX );
+        strncat_s( file_template, file_templatePS.GetSizeOf(), lpPrefixString, MAX_PREFIX );
     }
     FILEDosToUnixPathA( file_template );
-    strncat_s( file_template, sizeof(file_template), "%.4x.TMP", MAX_SEEDSIZE );
+    strncat_s( file_template, file_templatePS.GetSizeOf(), "%.4x.TMP", MAX_SEEDSIZE );
 
     /* Create the file. */
     dwError = GetLastError();
     pThread->SetLastError( NOERROR );
 
-    sprintf_s( full_name, sizeof(full_name), file_template, (0 == uUnique) ? uUniqueSeed : uUnique);
+    length = strlen(file_template) + MAX_SEEDSIZE + MAX_PREFIX;
+    full_name = full_namePS.OpenStringBuffer(length);
+    if (NULL == full_name)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto done;
+    }
+    sprintf_s( full_name, full_namePS.GetSizeOf(), file_template, (0 == uUnique) ? uUniqueSeed : uUnique);
+    full_namePS.CloseBuffer(length);
     
     hTempFile = CreateFileA( full_name, GENERIC_WRITE, 
                              FILE_SHARE_READ, NULL, CREATE_NEW, 0, NULL );
@@ -3453,7 +3615,7 @@ GetTempFileNameA(
             ENSURE_UNIQUE_NOT_ZERO;
 
             pThread->SetLastError( NOERROR );
-            sprintf_s( full_name, sizeof(full_name), file_template, uUniqueSeed );
+            sprintf_s( full_name, full_namePS.GetSizeOf(), file_template, uUniqueSeed );
             hTempFile = CreateFileA( full_name, GENERIC_WRITE, 
                                     FILE_SHARE_READ, NULL, CREATE_NEW, 0, NULL );
             uLoopCounter++;
@@ -3484,7 +3646,7 @@ GetTempFileNameA(
         
         if ( CloseHandle( hTempFile ) )
         {
-            if (strcpy_s( lpTempFileName, MAX_PATH, full_name ) != SAFECRT_SUCCESS)
+            if (strcpy_s( lpTempFileName, MAX_LONGPATH, full_name ) != SAFECRT_SUCCESS)
             {
                 ERROR( "strcpy_s failed!\n");
                 pThread->SetLastError( ERROR_FILENAME_EXCED_RANGE );
@@ -3543,9 +3705,11 @@ GetTempFileNameW(
     CPalThread *pThread;
     INT path_size = 0;
     INT prefix_size = 0;
-    CHAR full_name[ MAX_PATH + 1 ];
-    CHAR prefix_string[ MAX_PATH + 1 ];
-    CHAR tempfile_name[ MAX_PATH + 1 ];
+    CHAR * full_name;
+    CHAR * prefix_string;
+    CHAR * tempfile_name;
+    PathCharString full_namePS, prefix_stringPS;
+    INT length = 0;
     UINT   uRet;
 
     PERF_ENTRY(GetTempFileNameW);
@@ -3563,14 +3727,24 @@ GetTempFileNameW(
         goto done;
     }
 
+    length = (PAL_wcslen(lpPathName)+1) * MaxWCharToAcpLengthFactor;
+    full_name = full_namePS.OpenStringBuffer(length);
+    if (NULL == full_name)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        uRet = 0;
+        goto done;
+    }
     path_size = WideCharToMultiByte( CP_ACP, 0, lpPathName, -1, full_name,
-                                     MAX_PATH, NULL, NULL );
+                                     length, NULL, NULL );
+    full_namePS.CloseBuffer(path_size);
+                                     
     if( path_size == 0 )
     {
         DWORD dwLastError = GetLastError();
         if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
         {
-            WARN("lpPathName is larger than MAX_PATH (%d)!\n", MAX_PATH);
+            WARN("lpPathName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
             pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
         }
         else
@@ -3584,16 +3758,26 @@ GetTempFileNameW(
     
     if (lpPrefixString != NULL) 
     {
+        length = (PAL_wcslen(lpPrefixString)+1) * MaxWCharToAcpLengthFactor;
+        prefix_string = prefix_stringPS.OpenStringBuffer(length);
+        if (NULL == prefix_string)
+        {
+            pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            uRet = 0;
+            goto done;
+        }
         prefix_size = WideCharToMultiByte( CP_ACP, 0, lpPrefixString, -1, 
                                            prefix_string,
-                                           MAX_PATH - path_size - MAX_SEEDSIZE, 
+                                           MAX_LONGPATH - path_size - MAX_SEEDSIZE, 
                                            NULL, NULL );
+        prefix_stringPS.CloseBuffer(prefix_size);
+        
         if( prefix_size == 0 )
         {
             DWORD dwLastError = GetLastError();
             if( dwLastError == ERROR_INSUFFICIENT_BUFFER )
             {
-                WARN("Full name would be larger than MAX_PATH (%d)!\n", MAX_PATH);
+                WARN("Full name would be larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
                 pThread->SetLastError(ERROR_FILENAME_EXCED_RANGE);
             }
             else
@@ -3605,28 +3789,41 @@ GetTempFileNameW(
             goto done;
         }
     }
-       
+    
+    tempfile_name = (char*)InternalMalloc(pThread, MAX_LONGPATH);
+    if (tempfile_name == NULL)
+    {
+        pThread->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        uRet = 0;
+        goto done;
+    }
+    
     uRet = GetTempFileNameA(full_name, 
                             (lpPrefixString == NULL) ? NULL : prefix_string,
                             0, tempfile_name);
-        
-    if ( uRet && !MultiByteToWideChar( CP_ACP, 0, tempfile_name, -1, 
-                                       lpTempFileName, MAX_PATH ))
-    {
-        DWORD dwLastError = GetLastError();
-        if (dwLastError == ERROR_INSUFFICIENT_BUFFER)
+    if (uRet)
+    {                    
+        path_size = MultiByteToWideChar( CP_ACP, 0, tempfile_name, -1, 
+                                           lpTempFileName, MAX_LONGPATH );
+
+        InternalFree(pThread, tempfile_name);
+        tempfile_name = NULL;
+        if (!path_size)
         {
-            WARN("File names larger than MAX_PATH (%d)! \n", MAX_PATH);
-            dwLastError = ERROR_FILENAME_EXCED_RANGE;
+            DWORD dwLastError = GetLastError();
+            if (dwLastError == ERROR_INSUFFICIENT_BUFFER)
+            {
+                WARN("File names larger than MAX_PATH_FNAME (%d)! \n", MAX_LONGPATH);
+                dwLastError = ERROR_FILENAME_EXCED_RANGE;
+            }
+            else
+            {
+                ASSERT("MultiByteToWideChar failure! error is %d", dwLastError);     
+                dwLastError = ERROR_INTERNAL_ERROR;
+            }
+            pThread->SetLastError(dwLastError);
+            uRet = 0;
         }
-        else
-        {
-            ASSERT("MultiByteToWideChar failure! error is %d", dwLastError);     
-            dwLastError = ERROR_INTERNAL_ERROR;
-        }
-        pThread->SetLastError(dwLastError);
-        uRet = 0;
-        goto done;
     }
 
 done:
@@ -4765,7 +4962,7 @@ Input parameters:
 source  = path to the file on input, path to the file with all 
           symbolic links traversed on return
 
-Note: Assumes the maximum size of the source is MAX_PATH
+Note: Assumes the maximum size of the source is MAX_LONGPATH
 
 Return value:
     TRUE on success, FALSE on failure
@@ -4773,18 +4970,20 @@ Return value:
 BOOL FILEGetFileNameFromSymLink(char *source)
 {
     int ret;
-    char sLinkData[MAX_PATH];
+    CPalThread* pThread = InternalGetCurrentThread();
+    char * sLinkData = (char*)InternalMalloc(pThread, MAX_LONGPATH);
 
     do
     {
-        ret = readlink(source, sLinkData, MAX_PATH);
+        ret = readlink(source, sLinkData, MAX_LONGPATH);
         if (ret>0)
         {
             sLinkData[ret] = '\0';
-            strcpy_s(source, sizeof(sLinkData), sLinkData);
+            strcpy_s(source, sizeof(char)*(MAX_LONGPATH), sLinkData);
         }
     } while (ret > 0);
 
+    InternalFree(pThread, sLinkData);
     return (errno == EINVAL);
 }
 

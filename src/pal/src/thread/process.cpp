@@ -33,6 +33,7 @@ Abstract:
 #include "pal/utils.h"
 #include "pal/misc.h"
 #include "pal/virtual.h"
+#include "pal/stackstring.hpp"
 
 #include <errno.h>
 #if HAVE_POLL
@@ -47,6 +48,7 @@ Abstract:
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <debugmacrosext.h>
 
 using namespace CorUnix;
 
@@ -170,16 +172,6 @@ static BOOL getPath(LPCSTR lpFileName, UINT iLen, LPSTR  lpPathFileName);
 static int checkFileType(char *lpFileName);
 static BOOL PROCEndProcess(HANDLE hProcess, UINT uExitCode,
                            BOOL bTerminateUnconditionally);
-
-//
-// Struct for temporary process module list
-//
-struct ProcessModules
-{
-    ProcessModules *Next;
-    PVOID BaseAddress;
-    CHAR Name[0];
-};
 
 ProcessModules *CreateProcessModules(IN HANDLE hProcess, OUT LPDWORD lpCount);
 void DestroyProcessModules(IN ProcessModules *listHead);
@@ -569,7 +561,8 @@ CorUnix::InternalCreateProcess(
     int iFdErr = -1;
     
     pid_t processId;
-    char lpFileName[MAX_PATH] ;
+    char * lpFileName;
+    PathCharString lpFileNamePS;
     char **lppArgv = NULL;
     UINT nArg;
     int  iRet;
@@ -589,7 +582,7 @@ CorUnix::InternalCreateProcess(
                lpApplicationName);
         palError = ERROR_INVALID_PARAMETER;
         goto InternalCreateProcessExit;
-    }
+    } 
 
     if (0 != (dwCreationFlags & ~(CREATE_SUSPENDED|CREATE_NEW_CONSOLE)))
     {
@@ -683,13 +676,20 @@ CorUnix::InternalCreateProcess(
         }
     }
 
+    lpFileName = lpFileNamePS.OpenStringBuffer(MAX_LONGPATH-1);
+    if (NULL == lpFileName)
+    {
+        palError = ERROR_NOT_ENOUGH_MEMORY;
+        goto InternalCreateProcessExit;
+    }
     if (!getFileName(lpApplicationName, lpCommandLine, lpFileName))
     {
         ERROR("Can't find executable!\n");
         palError = ERROR_FILE_NOT_FOUND;
         goto InternalCreateProcessExit;
     }
-
+    
+    lpFileNamePS.CloseBuffer(MAX_LONGPATH-1);
     /* check type of file */
     iRet = checkFileType(lpFileName);
 
@@ -702,13 +702,13 @@ CorUnix::InternalCreateProcess(
 
         case FILE_PE: /* PE/COFF file */
             /*Get the path name where the PAL DLL was loaded from
-             * I am using MAX_PATH - (strlen(PROCESS_PELOADER_FILENAME)+1)
+             * I am using MAX_LONGPATH - (strlen(PROCESS_PELOADER_FILENAME)+1)
              * as the length as I have to append the file name at the end */
             if ( PAL_GetPALDirectoryA( lpFileName,
-                                      (MAX_PATH - (strlen(PROCESS_PELOADER_FILENAME)+1))))
+                                      (MAX_LONGPATH - (strlen(PROCESS_PELOADER_FILENAME)+1))))
             {
-                if ((strcat_s(lpFileName, sizeof(lpFileName), "/") != SAFECRT_SUCCESS) ||
-                    (strcat_s(lpFileName, sizeof(lpFileName), PROCESS_PELOADER_FILENAME) != SAFECRT_SUCCESS))
+                if ((strcat_s(lpFileName, lpFileNamePS.GetSizeOf(), "/") != SAFECRT_SUCCESS) ||
+                    (strcat_s(lpFileName, lpFileNamePS.GetSizeOf(), PROCESS_PELOADER_FILENAME) != SAFECRT_SUCCESS))
                 {
                     ERROR("strcpy_s/strcat_s failed!\n");
                     palError = ERROR_INTERNAL_ERROR;
@@ -1410,10 +1410,9 @@ void PROCCleanupProcess(BOOL bTerminateUnconditionally)
     /* Declare the beginning of shutdown */
     PALSetShutdownIntent();
 
-    PALCommonCleanup(PALCLEANUP_STEP_ONE, FALSE);
+    PALCommonCleanup();
 
-    /* This must be called after PALCommonCleanup(PALCLEANUP_STEP_ONE, ...)
-     */
+    /* This must be called after PALCommonCleanup */
     PALShutdown();
 }
 
@@ -1817,8 +1816,6 @@ EnumProcessModules(
         result = FALSE;
     }
 
-    DestroyProcessModules(listHead);
-
     if (lpcbNeeded)
     {
         // This return value isn't exactly up to spec because it should return the actual
@@ -1865,8 +1862,6 @@ GetModuleFileNameExW(
         }
     }
 
-    DestroyProcessModules(listHead);
-
     return result;
 }
 
@@ -1886,57 +1881,104 @@ CreateProcessModules(
     IN HANDLE hProcess,
     OUT LPDWORD lpCount)
 {
-    DWORD dwProcessId = PROCGetProcessIDFromHandle(hProcess);
-    if (dwProcessId == 0)
-    {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return NULL;
-    }
-
-#ifdef HAVE_PROCFS_CTL 
-    // Here we read /proc/<pid>/maps file in order to parse it and figure out what it says 
-    // about a library we are looking for. This file looks something like this:
-    //
-    // [address]      [perms] [offset] [dev] [inode]     [pathname] - HEADER is not preset in an actual file
-    //
-    // 35b1800000-35b1820000 r-xp 00000000 08:02 135522  /usr/lib64/ld-2.15.so
-    // 35b1a1f000-35b1a20000 r--p 0001f000 08:02 135522  /usr/lib64/ld-2.15.so
-    // 35b1a20000-35b1a21000 rw-p 00020000 08:02 135522  /usr/lib64/ld-2.15.so
-    // 35b1a21000-35b1a22000 rw-p 00000000 00:00 0       [heap]
-    // 35b1c00000-35b1dac000 r-xp 00000000 08:02 135870  /usr/lib64/libc-2.15.so
-    // 35b1dac000-35b1fac000 ---p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
-    // 35b1fac000-35b1fb0000 r--p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
-    // 35b1fb0000-35b1fb2000 rw-p 001b0000 08:02 135870  /usr/lib64/libc-2.15.so
-
-    // Making something like: /proc/123/maps
-    char mapFileName[100]; 
-    int chars = snprintf(mapFileName, sizeof(mapFileName), "/proc/%d/maps", dwProcessId);
-    _ASSERTE(chars > 0 && chars <= sizeof(mapFileName));
-
-    FILE *mapsFile = fopen(mapFileName, "r");
-    if (mapsFile == NULL) 
-    {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return NULL;
-    }
-
-    CPalThread* pThread = InternalGetCurrentThread();	
+    CPalThread* pThread = InternalGetCurrentThread();
+    CProcProcessLocalData *pLocalData = NULL;
     ProcessModules *listHead = NULL;
-    char *line = NULL;
-    size_t lineLen = 0;
-    int count = 0;
-    ssize_t read;
+    IPalObject *pobjProcess = NULL;
+    IDataLock *pDataLock = NULL;
+    PAL_ERROR palError = NO_ERROR;
+    DWORD dwProcessId = 0;
 
-    // Reading maps file line by line 
-    while ((read = getline(&line, &lineLen, mapsFile)) != -1) 
+    if (hPseudoCurrentProcess == hProcess)
     {
-        void *startAddress, *endAddress, *offset;
-        int devHi, devLo, inode;
-        char moduleName[PATH_MAX];
+        dwProcessId = gPID;
+    }
+    else
+    {
+        CAllowedObjectTypes aotProcess(otiProcess);
 
-        if (sscanf(line, "%p-%p %*[-rwxsp] %p %x:%x %d %s\n", &startAddress, &endAddress, &offset, &devHi, &devLo, &inode, moduleName) == 7)
+        palError = g_pObjectManager->ReferenceObjectByHandle(
+            pThread,
+            hProcess,
+            &aotProcess,
+            0,
+            &pobjProcess
+            );
+
+        if (NO_ERROR != palError)
         {
-            if (inode != 0)
+            goto exit;
+        }
+
+        palError = pobjProcess->GetProcessLocalData(
+            pThread,
+            WriteLock,
+            &pDataLock,
+            reinterpret_cast<void **>(&pLocalData)
+            );
+
+        if (NO_ERROR != palError)
+        {
+            goto exit;
+        }
+
+        dwProcessId = pLocalData->dwProcessId;
+        listHead = pLocalData->pProcessModules;
+    }
+
+    // If the module list hasn't been created yet, create it now
+    if (listHead == NULL)
+    {
+#if defined(__APPLE__)
+
+        // For OSx, the "vmmap" command outputs something similar to the /proc/*/maps file so popen the
+        // command and read the relevant lines:
+        //
+        // ...
+        // ==== regions for process 347  (non-writable and writable regions are interleaved)
+        // REGION TYPE                      START - END             [ VSIZE] PRT/MAX SHRMOD  REGION DETAIL
+        // __TEXT                 000000010446d000-0000000104475000 [   32K] r-x/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/corerun
+        // __DATA                 0000000104475000-0000000104476000 [    4K] rw-/rwx SM=PRV  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/corerun
+        // __LINKEDIT             0000000104476000-000000010447a000 [   16K] r--/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/corerun
+        // Kernel Alloc Once      000000010447a000-000000010447b000 [    4K] rw-/rwx SM=PRV
+        // MALLOC (admin)         000000010447b000-000000010447c000 [    4K] r--/rwx SM=ZER
+        // ...
+        // MALLOC (admin)         00000001044ab000-00000001044ac000 [    4K] r--/rwx SM=PRV
+        // __TEXT                 00000001044ac000-0000000104c84000 [ 8032K] r-x/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __TEXT                 0000000104c84000-0000000104c85000 [    4K] rwx/rwx SM=PRV  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __TEXT                 0000000104c85000-000000010513b000 [ 4824K] r-x/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __TEXT                 000000010513b000-000000010513c000 [    4K] rwx/rwx SM=PRV  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __TEXT                 000000010513c000-000000010516f000 [  204K] r-x/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __DATA                 000000010516f000-00000001051ce000 [  380K] rw-/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __DATA                 00000001051ce000-00000001051fa000 [  176K] rw-/rwx SM=PRV  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // __LINKEDIT             00000001051fa000-0000000105bac000 [ 9928K] r--/rwx SM=COW  /Users/mikem/coreclr/bin/Product/OSx.x64.Debug/libcoreclr.dylib
+        // VM_ALLOCATE            0000000105bac000-0000000105bad000 [    4K] r--/rw- SM=SHM
+        // MALLOC (admin)         0000000105bad000-0000000105bae000 [    4K] r--/rwx SM=ZER
+        // MALLOC                 0000000105bae000-0000000105baf000 [    4K] rw-/rwx SM=ZER
+        char *line = NULL;
+        size_t lineLen = 0;
+        int count = 0;
+        ssize_t read;
+
+        char vmmapCommand[100];
+        int chars = snprintf(vmmapCommand, sizeof(vmmapCommand), "/usr/bin/vmmap -interleaved %d", dwProcessId);
+        _ASSERTE(chars > 0 && chars <= sizeof(vmmapCommand));
+
+        FILE *vmmapFile = popen(vmmapCommand, "r");
+        if (vmmapFile == NULL)
+        {
+            SetLastError(ERROR_INVALID_HANDLE);
+            return NULL;
+        }
+
+        // Reading maps file line by line
+        while ((read = getline(&line, &lineLen, vmmapFile)) != -1)
+        {
+            void *startAddress, *endAddress;
+            char moduleName[PATH_MAX];
+            int size;
+
+            if (sscanf(line, "__TEXT %p-%p [ %dK] %*[-/rwxsp] SM=%*[A-Z] %s\n", &startAddress, &endAddress, &size, moduleName) == 4)
             {
                 bool dup = false;
                 for (ProcessModules *entry = listHead; entry != NULL; entry = entry->Next)
@@ -1968,20 +2010,124 @@ CreateProcessModules(
                 }
             }
         }
+
+        *lpCount = count;
+
+        free(line); // We didn't allocate line, but as per contract of getline we should free it
+        pclose(vmmapFile);
+
+#elif defined(HAVE_PROCFS_CTL)
+
+        // Here we read /proc/<pid>/maps file in order to parse it and figure out what it says 
+        // about a library we are looking for. This file looks something like this:
+        //
+        // [address]      [perms] [offset] [dev] [inode]     [pathname] - HEADER is not preset in an actual file
+        //
+        // 35b1800000-35b1820000 r-xp 00000000 08:02 135522  /usr/lib64/ld-2.15.so
+        // 35b1a1f000-35b1a20000 r--p 0001f000 08:02 135522  /usr/lib64/ld-2.15.so
+        // 35b1a20000-35b1a21000 rw-p 00020000 08:02 135522  /usr/lib64/ld-2.15.so
+        // 35b1a21000-35b1a22000 rw-p 00000000 00:00 0       [heap]
+        // 35b1c00000-35b1dac000 r-xp 00000000 08:02 135870  /usr/lib64/libc-2.15.so
+        // 35b1dac000-35b1fac000 ---p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
+        // 35b1fac000-35b1fb0000 r--p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
+        // 35b1fb0000-35b1fb2000 rw-p 001b0000 08:02 135870  /usr/lib64/libc-2.15.so
+
+        // Making something like: /proc/123/maps
+        char mapFileName[100]; 
+
+        INDEBUG(int chars = )
+        snprintf(mapFileName, sizeof(mapFileName), "/proc/%d/maps", dwProcessId);
+        _ASSERTE(chars > 0 && chars <= sizeof(mapFileName));
+
+        FILE *mapsFile = fopen(mapFileName, "r");
+        if (mapsFile == NULL) 
+        {
+            SetLastError(ERROR_INVALID_HANDLE);
+            return NULL;
+        }
+
+        char *line = NULL;
+        size_t lineLen = 0;
+        int count = 0;
+        ssize_t read;
+
+        // Reading maps file line by line 
+        while ((read = getline(&line, &lineLen, mapsFile)) != -1) 
+        {
+            void *startAddress, *endAddress, *offset;
+            int devHi, devLo, inode;
+            char moduleName[PATH_MAX];
+
+            if (sscanf(line, "%p-%p %*[-rwxsp] %p %x:%x %d %s\n", &startAddress, &endAddress, &offset, &devHi, &devLo, &inode, moduleName) == 7)
+            {
+                if (inode != 0)
+                {
+                    bool dup = false;
+                    for (ProcessModules *entry = listHead; entry != NULL; entry = entry->Next)
+                    {
+                        if (strcmp(moduleName, entry->Name) == 0)
+                        {
+                            dup = true;
+                            break;
+                        }
+                    }
+
+                    if (!dup)
+                    {
+                        int cbModuleName = strlen(moduleName) + 1;
+                        ProcessModules *entry = (ProcessModules *)InternalMalloc(pThread, sizeof(ProcessModules) + cbModuleName);
+                        if (entry == NULL)
+                        {
+                            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                            DestroyProcessModules(listHead);
+                            listHead = NULL;
+                            count = 0;
+                            break;
+                        }
+                        strcpy_s(entry->Name, cbModuleName, moduleName);
+                        entry->BaseAddress = startAddress;
+                        entry->Next = listHead;
+                        listHead = entry;
+                        count++;
+                    }
+                }
+            }
+        }
+
+        *lpCount = count;
+
+        free(line); // We didn't allocate line, but as per contract of getline we should free it
+        fclose(mapsFile);
+#else
+        _ASSERTE(!"Not implemented on this platform");
+#endif
+        if (pLocalData != NULL)
+        {
+            pLocalData->pProcessModules = listHead;
+        }
+    }
+exit:
+    if (NULL != pDataLock)
+    {
+        pDataLock->ReleaseLock(pThread, TRUE);
     }
 
-    *lpCount = count;
-
-    free(line); // We didn't allocate line, but as per contract of getline we should free it
-    fclose(mapsFile);
-
+    if (NULL != pobjProcess)
+    {
+        pobjProcess->ReleaseReference(pThread);
+    }
     return listHead;
-#else
-    _ASSERTE(!"Not implemented on this platform");
-    return NULL;
-#endif
 }
 
+/*++
+Function:
+    DestroyProcessModules
+
+Abstract
+  Cleans up the process module table.
+Return
+  TRUE if it succeeded, FALSE otherwise
+--*/
 void
 DestroyProcessModules(IN ProcessModules *listHead)
 {
@@ -3065,18 +3211,19 @@ getFileName(
 {
     LPWSTR lpEnd;
     WCHAR wcEnd;
-    char lpFileName[MAX_PATH];
+    char * lpFileName;
+    PathCharString lpFileNamePS;
     char *lpTemp;
 
     if (lpApplicationName)
     {
-        int path_size = MAX_PATH;
+        int path_size = MAX_LONGPATH;
         lpTemp = lpPathFileName;
         /* if only a file name is specified, prefix it with "./" */
         if ((*lpApplicationName != '.') && (*lpApplicationName != '/') &&
             (*lpApplicationName != '\\'))
         {
-            if (strcpy_s(lpPathFileName, MAX_PATH, "./") != SAFECRT_SUCCESS)
+            if (strcpy_s(lpPathFileName, MAX_LONGPATH, "./") != SAFECRT_SUCCESS)
             {
                 ERROR("strcpy_s failed!\n");
                 return FALSE;
@@ -3148,20 +3295,29 @@ getFileName(
         *lpEnd = 0x0000;
 
         /* Convert to ASCII */
-        if (!WideCharToMultiByte(CP_ACP, 0, lpCommandLine, -1,
-                                 lpFileName, MAX_PATH, NULL, NULL))
+        int size = 0;
+        int length = (PAL_wcslen(lpCommandLine)+1) * sizeof(WCHAR);
+        lpFileName = lpFileNamePS.OpenStringBuffer(length);
+        if (NULL == lpFileName)
+        {
+            ERROR("Not Enough Memory!\n");
+            return FALSE;
+        }
+        if (!(size = WideCharToMultiByte(CP_ACP, 0, lpCommandLine, -1,
+                                 lpFileName, length, NULL, NULL)))
         {
             ASSERT("WideCharToMultiByte failure\n");
             return FALSE;
         }
 
+        lpFileNamePS.CloseBuffer(size);
         /* restore last character */
         *lpEnd = wcEnd;
 
         /* Replace '\' by '/' */
         FILEDosToUnixPathA(lpFileName);
 
-        if (!getPath(lpFileName, MAX_PATH, lpPathFileName))
+        if (!getPath(lpFileName, MAX_LONGPATH, lpPathFileName))
         {
             /* file is not in the path */
             return FALSE;
@@ -3905,8 +4061,7 @@ CorUnix::CPalThread *PROCThreadFromMachPort(mach_port_t hTargetThread)
     pThread = pGThreadList;
     while (pThread)
     {
-        pthread_t pPThread = pThread->GetPThreadSelf();
-        mach_port_t hThread = pthread_mach_thread_np(pPThread);
+        mach_port_t hThread = pThread->GetMachPortSelf();
         if (hThread == hTargetThread)
             break;
 
@@ -3918,3 +4073,18 @@ CorUnix::CPalThread *PROCThreadFromMachPort(mach_port_t hTargetThread)
     return pThread;
 }
 #endif // HAVE_MACH_EXCEPTIONS
+
+/*++
+Function:
+    ~CProcProcessLocalData
+
+Process data destructor
+--*/
+CorUnix::CProcProcessLocalData::~CProcProcessLocalData()
+{
+    if (pProcessModules != NULL)
+    {
+        DestroyProcessModules(pProcessModules);
+    }
+}
+        

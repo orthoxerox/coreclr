@@ -20,6 +20,7 @@ Abstract:
 --*/
 
 #include "pal/corunix.hpp"
+#include "pal/context.h"
 #include "pal/thread.hpp"
 #include "pal/mutex.hpp"
 #include "pal/handlemgr.hpp"
@@ -84,6 +85,11 @@ can't be suspended. */
 pthread_mutex_t ptmEndThread;
 pthread_cond_t ptcEndThread;
 static int iEndingThreads = 0;
+
+// Activation function that gets called when an activation is injected into a thread.
+PAL_ActivationFunction g_activationFunction = NULL;
+// Function to check if an activation can be safely injected at a specified context
+PAL_SafeActivationCheckFunction g_safeActivationCheckFunction = NULL;
 
 void
 ThreadCleanupRoutine(
@@ -1364,7 +1370,7 @@ GetThreadTimes(
     pthrTarget->Lock(pthrCurrent);
 	
     mach_port_t mhThread;
-    mhThread = pthread_mach_thread_np(pthrTarget->GetPThreadSelf());
+    mhThread = pthrTarget->GetMachPortSelf();
 	
 	kern_return_t status;
 	status = thread_info(
@@ -1466,6 +1472,9 @@ CPalThread::ThreadEntry(
 
     pThread->m_threadId = THREADSilentGetCurrentThreadId();
     pThread->m_pthreadSelf = pthread_self();
+#if HAVE_MACH_THREADS
+    pThread->m_machPortSelf = pthread_mach_thread_np(pThread->m_pthreadSelf);
+#endif
 #if HAVE_THREAD_SELF
     pThread->m_dwLwpId = (DWORD) thread_self();
 #elif HAVE__LWP_SELF
@@ -1638,6 +1647,9 @@ CorUnix::CreateThreadData(
 
     pThread->m_threadId = THREADSilentGetCurrentThreadId();
     pThread->m_pthreadSelf = pthread_self();
+#if HAVE_MACH_THREADS
+    pThread->m_machPortSelf = pthread_mach_thread_np(pThread->m_pthreadSelf);
+#endif
 #if HAVE_THREAD_SELF
     pThread->m_dwLwpId = (DWORD) thread_self();
 #elif HAVE__LWP_SELF
@@ -2416,76 +2428,196 @@ ThreadInitializationRoutine(
     return NO_ERROR;
 }
 
+// Get base address of this thread's stack
+// Can be called only for the current thread.
+void *
+CPalThread::GetStackBase()
+{
+    _ASSERT_MSG(this == InternalGetCurrentThread(), "CPalThread::GetStackBase called from foreign thread");
+
+    if (m_stackBase == NULL)
+    {
+#ifdef _TARGET_MAC64
+        // This is a Mac specific method
+        m_stackBase = pthread_get_stackaddr_np(pthread_self());
+#else
+        pthread_attr_t attr;
+        void* stackAddr;
+        size_t stackSize;
+        int status;
+
+        pthread_t thread = pthread_self();
+
+        status = pthread_attr_init(&attr);
+        _ASSERT_MSG(status == 0, "pthread_attr_init call failed");
+
+#if HAVE_PTHREAD_ATTR_GET_NP
+        status = pthread_attr_get_np(thread, &attr);
+#elif HAVE_PTHREAD_GETATTR_NP
+        status = pthread_getattr_np(thread, &attr);
+#else
+#error Dont know how to get thread attributes on this platform!
+#endif
+        _ASSERT_MSG(status == 0, "pthread_getattr_np call failed");
+
+        status = pthread_attr_getstack(&attr, &stackAddr, &stackSize);
+        _ASSERT_MSG(status == 0, "pthread_attr_getstack call failed");
+
+        status = pthread_attr_destroy(&attr);
+        _ASSERT_MSG(status == 0, "pthread_attr_destroy call failed");
+
+        m_stackBase = (void*)((size_t)stackAddr + stackSize);
+#endif
+    }
+
+    return m_stackBase;
+}
+
+// Get limit address of this thread's stack.
+// Can be called only for the current thread.
+void *
+CPalThread::GetStackLimit()
+{
+    _ASSERT_MSG(this == InternalGetCurrentThread(), "CPalThread::GetStackLimit called from foreign thread");
+
+    if (m_stackLimit == NULL)
+    {
+#ifdef _TARGET_MAC64
+        // This is a Mac specific method
+        m_stackLimit = ((BYTE *)pthread_get_stackaddr_np(pthread_self()) -
+                       pthread_get_stacksize_np(pthread_self()));
+#else
+        pthread_attr_t attr;
+        size_t stackSize;
+        int status;
+
+        pthread_t thread = pthread_self();
+
+        status = pthread_attr_init(&attr);
+        _ASSERT_MSG(status == 0, "pthread_attr_init call failed");
+
+#if HAVE_PTHREAD_ATTR_GET_NP
+        status = pthread_attr_get_np(thread, &attr);
+#elif HAVE_PTHREAD_GETATTR_NP
+        status = pthread_getattr_np(thread, &attr);
+#else
+#error Dont know how to get thread attributes on this platform!
+#endif
+        _ASSERT_MSG(status == 0, "pthread_getattr_np call failed");
+
+        status = pthread_attr_getstack(&attr, &m_stackLimit, &stackSize);
+        _ASSERT_MSG(status == 0, "pthread_attr_getstack call failed");
+
+        status = pthread_attr_destroy(&attr);
+        _ASSERT_MSG(status == 0, "pthread_attr_destroy call failed");
+#endif
+    }
+
+    return m_stackLimit;
+}
+
 void *
 PALAPI
 PAL_GetStackBase()
 {
-#ifdef _TARGET_MAC64
-    // This is a Mac specific method
-    return pthread_get_stackaddr_np(pthread_self());
-#else
-    pthread_attr_t attr;
-    void* stackAddr;
-    size_t stackSize;
-    int status;
-    
-    pthread_t thread = pthread_self();
-    
-    status = pthread_attr_init(&attr);
-    _ASSERT_MSG(status == 0, "pthread_attr_init call failed");
-
-#if HAVE_PTHREAD_ATTR_GET_NP
-    status = pthread_attr_get_np(thread, &attr);
-#elif HAVE_PTHREAD_GETATTR_NP
-    status = pthread_getattr_np(thread, &attr);
-#else
-#error Dont know how to get thread attributes on this platform!
-#endif
-    _ASSERT_MSG(status == 0, "pthread_getattr_np call failed");
-
-    status = pthread_attr_getstack(&attr, &stackAddr, &stackSize);
-    _ASSERT_MSG(status == 0, "pthread_attr_getstack call failed");
-
-    return (void*)((size_t)stackAddr + stackSize);
-#endif
+    CPalThread* thread = InternalGetCurrentThread();
+    return thread->GetStackBase();
 }
 
 void *
 PALAPI
 PAL_GetStackLimit()
 {
-#ifdef _TARGET_MAC64
-    // This is a Mac specific method
-    return ((BYTE *)pthread_get_stackaddr_np(pthread_self()) -
-            pthread_get_stacksize_np(pthread_self()));
-#else
-    pthread_attr_t attr;
-    void* stackAddr;
-    size_t stackSize;
-    int status;
-    
-    pthread_t thread = pthread_self();
-    
-    status = pthread_attr_init(&attr);
-    _ASSERT_MSG(status == 0, "pthread_attr_init call failed");
+    CPalThread* thread = InternalGetCurrentThread();
+    return thread->GetStackLimit();
+}
 
-#if HAVE_PTHREAD_ATTR_GET_NP
-    status = pthread_attr_get_np(thread, &attr);
-#elif HAVE_PTHREAD_GETATTR_NP
-    status = pthread_getattr_np(thread, &attr);
-#else
-#error Dont know how to get thread attributes on this platform!
-#endif
-    _ASSERT_MSG(status == 0, "pthread_getattr_np call failed");
+PAL_ERROR InjectActivationInternal(CorUnix::CPalThread* pThread);
 
-    status = pthread_attr_getstack(&attr, &stackAddr, &stackSize);
-    _ASSERT_MSG(status == 0, "pthread_attr_getstack call failed");
-    
-    return stackAddr;
-#endif
+/*++
+Function:
+    PAL_SetActivationFunction
+
+    Register an activation function that gets called when an activation is injected
+    into a thread.
+
+Parameters:
+    pActivationFunction - activation function
+    pSafeActivationCheckFunction - function to check if an activation can be safely
+                                   injected at a specified context
+Return value:
+    None
+--*/
+PALIMPORT
+VOID
+PALAPI
+PAL_SetActivationFunction(
+    IN PAL_ActivationFunction pActivationFunction,
+    IN PAL_SafeActivationCheckFunction pSafeActivationCheckFunction)
+{
+    g_activationFunction = pActivationFunction;
+    g_safeActivationCheckFunction = pSafeActivationCheckFunction;
+}
+
+/*++
+Function:
+PAL_InjectActivation
+
+Interrupt the specified thread and have it call an activation function registered
+using the PAL_SetActivationFunction
+
+Parameters:
+hThread            - handle of the target thread
+
+Return:
+TRUE if it succeeded, FALSE otherwise.
+--*/
+BOOL
+PALAPI
+PAL_InjectActivation(
+    IN HANDLE hThread)
+{
+    PERF_ENTRY(PAL_InjectActivation);
+    ENTRY("PAL_InjectActivation(hThread=%p)\n", hThread);
+
+    CPalThread *pCurrentThread;
+    CPalThread *pTargetThread;
+    IPalObject *pobjThread = NULL;
+
+    pCurrentThread = InternalGetCurrentThread();
+
+    PAL_ERROR palError = InternalGetThreadDataFromHandle(
+        pCurrentThread,
+        hThread,
+        0,
+        &pTargetThread,
+        &pobjThread
+        );
+
+    if (palError == NO_ERROR)
+    {
+        palError = InjectActivationInternal(pTargetThread);
+    }
+
+    if (palError == NO_ERROR)
+    {
+        pCurrentThread->SetLastError(palError);
+    }
+
+    if (pobjThread != NULL)
+    {
+        pobjThread->ReleaseReference(pCurrentThread);
+    }
+
+    BOOL success = (palError == NO_ERROR);
+    LOGEXIT("PAL_InjectActivation returns:d\n", success);
+    PERF_EXIT(PAL_InjectActivation);
+
+    return success;
 }
 
 #if HAVE_MACH_EXCEPTIONS
+
 extern mach_port_t s_ExceptionPort;
 extern mach_port_t s_TopExceptionPort;
 

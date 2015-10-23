@@ -1162,7 +1162,7 @@ void    SplitPathInterior(
     __out_opt LPCWSTR *pwszFileName, __out_opt size_t *pcchFileName,
     __out_opt LPCWSTR *pwszExt,      __out_opt size_t *pcchExt);
 
-void    MakePath(__out_ecount (MAX_PATH) register WCHAR *path, 
+void    MakePath(__out_ecount (MAX_LONGPATH) register WCHAR *path, 
                  __in LPCWSTR drive, 
                  __in LPCWSTR dir, 
                  __in LPCWSTR fname, 
@@ -3208,8 +3208,16 @@ inline DWORD HashThreeToOne(DWORD a, DWORD b, DWORD c)
 {
     LIMITED_METHOD_DAC_CONTRACT;
 
-    // Current implementation taken from lookup3.c, by Bob Jenkins, May 2006
-    
+    /*
+    lookup3.c, by Bob Jenkins, May 2006, Public Domain.
+
+    These are functions for producing 32-bit hashes for hash table lookup.
+    hashword(), hashlittle(), hashlittle2(), hashbig(), mix(), and final() 
+    are externally useful functions.  Routines to test the hash are included 
+    if SELF_TEST is defined.  You can use this free for any purpose.  It's in
+    the public domain.  It has no warranty.
+    */
+
     #define rot32(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
     c ^= b; c -= rot32(b,14);
     a ^= c; a -= rot32(c,11);
@@ -5600,6 +5608,7 @@ namespace Clr { namespace Util
 namespace Reg
 {
     HRESULT ReadStringValue(HKEY hKey, LPCWSTR wszSubKey, LPCWSTR wszName, SString & ssValue);
+    __success(return == S_OK)
     HRESULT ReadStringValue(HKEY hKey, LPCWSTR wszSubKey, LPCWSTR wszName, __deref_out __deref_out_z LPWSTR* pwszValue);
 }
 
@@ -5625,6 +5634,7 @@ namespace Win32
         SString & ssFileName,
         bool fAllowLongFileNames = false);
 
+    __success(return == S_OK)
     HRESULT GetModuleFileName(
         HMODULE hModule,
         __deref_out_z LPWSTR * pwszFileName,

@@ -689,6 +689,9 @@ void InitThreadManager();
 EXTERN_C void __stdcall OnHijackObjectTripThread();                 // hijacked JIT code is returning an objectref
 EXTERN_C void __stdcall OnHijackInteriorPointerTripThread();        // hijacked JIT code is returning a byref
 EXTERN_C void __stdcall OnHijackScalarTripThread();                 // hijacked JIT code is returning a non-objectref, non-FP
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+EXTERN_C void __stdcall OnHijackStructInRegsTripThread();           // hijacked JIT code is returning a struct in registers
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
 
 #ifdef _TARGET_X86_
 EXTERN_C void __stdcall OnHijackFloatingPointTripThread();          // hijacked JIT code is returning an FP value
@@ -1017,6 +1020,9 @@ typedef DWORD (*AppropriateWaitFunc) (void *args, DWORD timeout, DWORD option);
 EXTERN_C void STDCALL OnHijackObjectWorker(HijackArgs * pArgs);
 EXTERN_C void STDCALL OnHijackInteriorPointerWorker(HijackArgs * pArgs);
 EXTERN_C void STDCALL OnHijackScalarWorker(HijackArgs * pArgs);
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+EXTERN_C void STDCALL OnHijackStructInRegsWorker(HijackArgs * pArgs);
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
 #endif // FEATURE_HIJACK
 
 // This is the code we pass around for Thread.Interrupt, mainly for assertions
@@ -1067,7 +1073,9 @@ class Thread: public IUnknown
     friend void STDCALL OnHijackObjectWorker(HijackArgs *pArgs);
     friend void STDCALL OnHijackInteriorPointerWorker(HijackArgs *pArgs);
     friend void STDCALL OnHijackScalarWorker(HijackArgs *pArgs);
-
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+    friend void STDCALL OnHijackStructInRegsWorker(HijackArgs *pArgs);
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
 #ifdef PLATFORM_UNIX
     friend void PALAPI HandleGCSuspensionForInterruptedThread(CONTEXT *interruptedContext);
 #endif // PLATFORM_UNIX
@@ -1787,10 +1795,12 @@ public:
 
 private:
     DWORD m_dwBeginLockCount;  // lock count when the thread enters current domain
+#ifndef FEATURE_CORECLR
     DWORD m_dwBeginCriticalRegionCount;  // lock count when the thread enters current domain
     DWORD m_dwCriticalRegionCount;
 
     DWORD m_dwThreadAffinityCount;
+#endif // !FEATURE_CORECLR
 
 #ifdef _DEBUG
     DWORD dbg_m_cSuspendedThreads;
@@ -1883,15 +1893,21 @@ public:
         LIMITED_METHOD_CONTRACT;
 
         _ASSERTE(m_dwLockCount >= m_dwBeginLockCount);
+#ifndef FEATURE_CORECLR
         _ASSERTE(m_dwCriticalRegionCount >= m_dwBeginCriticalRegionCount);
+#endif // !FEATURE_CORECLR
 
         // Equivalent to (m_dwLockCount != m_dwBeginLockCount ||
         //                m_dwCriticalRegionCount ! m_dwBeginCriticalRegionCount),
         // but without branching instructions
-        return ((m_dwLockCount ^ m_dwBeginLockCount) |
-                (m_dwCriticalRegionCount ^ m_dwBeginCriticalRegionCount));
-    }
+        BOOL fHasLock = (m_dwLockCount ^ m_dwBeginLockCount);
+#ifndef FEATURE_CORECLR
+        fHasLock |= (m_dwCriticalRegionCount ^ m_dwBeginCriticalRegionCount);
+#endif // !FEATURE_CORECLR
 
+        return fHasLock; 
+    }
+#ifndef FEATURE_CORECLR
     inline void BeginCriticalRegion()
     {
         LIMITED_METHOD_CONTRACT;
@@ -1929,11 +1945,16 @@ public:
         _ASSERTE (m_dwCriticalRegionCount > 0);
         m_dwCriticalRegionCount --;
     }
+#endif // !FEATURE_CORECLR
 
     inline BOOL HasCriticalRegion()
     {
         LIMITED_METHOD_CONTRACT;
+#ifndef FEATURE_CORECLR
         return m_dwCriticalRegionCount != 0;
+#else 
+        return FALSE;        
+#endif
     }
 
     inline DWORD GetNewHashCode()
@@ -1980,6 +2001,11 @@ public:
     static void ReverseEnterRuntimeThrowComplus();
     static void ReverseLeaveRuntime();
 
+    // Hook for OS Critical Section, Mutex, and others that require thread affinity
+    static void BeginThreadAffinity();
+    static void EndThreadAffinity();
+
+#ifndef FEATURE_CORECLR
     inline void IncThreadAffinityCount()
     {
         LIMITED_METHOD_CONTRACT;
@@ -1995,10 +2021,6 @@ public:
         m_dwThreadAffinityCount --;
     }
 
-    // Hook for OS Critical Section, Mutex, and others that require thread affinity
-    static void BeginThreadAffinity();
-    static void EndThreadAffinity();
-
     static void BeginThreadAffinityAndCriticalRegion()
     {
         LIMITED_METHOD_CONTRACT;
@@ -2012,11 +2034,16 @@ public:
         GetThread()->EndCriticalRegion();
         EndThreadAffinity();
     }
+#endif // !FEATURE_CORECLR
 
     BOOL HasThreadAffinity()
     {
         LIMITED_METHOD_CONTRACT;
+#ifndef FEATURE_CORECLR
         return m_dwThreadAffinityCount > 0;
+#else
+        return FALSE;
+#endif
     }
 
  private:
@@ -2546,6 +2573,8 @@ public:
         return m_ExceptionState.IsExceptionInProgress();
     }
 
+
+    void SyncManagedExceptionState(bool fIsDebuggerThread);
 
     //---------------------------------------------------------------
     // Per-thread information used by handler
@@ -5532,6 +5561,24 @@ public:
         _ASSERTE(pAllLoggedTypes != NULL ? m_pAllLoggedTypes == NULL : TRUE);
         m_pAllLoggedTypes = pAllLoggedTypes;
     }
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+private:
+    EEClass* m_pHijackReturnTypeClass;
+public:
+    EEClass* GetHijackReturnTypeClass()
+    {
+        LIMITED_METHOD_CONTRACT;
+
+        return m_pHijackReturnTypeClass;
+    }
+
+    void SetHijackReturnTypeClass(EEClass* pClass)
+    {
+        LIMITED_METHOD_CONTRACT;
+
+        m_pHijackReturnTypeClass = pClass;
+    }
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
 };
 
 // End of class Thread
@@ -5539,9 +5586,12 @@ public:
 
 LCID GetThreadCultureIdNoThrow(Thread *pThread, BOOL bUICulture);
 
+#ifndef FEATURE_CORECLR
 // Request/Remove Thread Affinity for the current thread
 typedef StateHolder<Thread::BeginThreadAffinityAndCriticalRegion, Thread::EndThreadAffinityAndCriticalRegion> ThreadAffinityAndCriticalRegionHolder;
+#endif // !FEATURE_CORECLR
 typedef StateHolder<Thread::BeginThreadAffinity, Thread::EndThreadAffinity> ThreadAffinityHolder;
+
 typedef Thread::ForbidSuspendThreadHolder ForbidSuspendThreadHolder;
 typedef Thread::ThreadPreventAsyncHolder ThreadPreventAsyncHolder;
 typedef Thread::ThreadPreventAbortHolder ThreadPreventAbortHolder;

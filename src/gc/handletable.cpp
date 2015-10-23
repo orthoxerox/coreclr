@@ -669,6 +669,30 @@ void HndSetHandleExtraInfo(OBJECTHANDLE handle, UINT uType, LPARAM lExtraInfo)
         *pUserData = lExtraInfo;
     }
 }
+
+/*
+* HndCompareExchangeHandleExtraInfo
+*
+* Stores owner data with handle.
+*
+*/
+LPARAM HndCompareExchangeHandleExtraInfo(OBJECTHANDLE handle, UINT uType, LPARAM lOldExtraInfo, LPARAM lNewExtraInfo)
+{
+    WRAPPER_NO_CONTRACT;
+
+    // fetch the user data slot for this handle if we have the right type
+    LPARAM *pUserData = HandleValidateAndFetchUserDataPointer(handle, uType);
+
+    // is there a slot?
+    if (pUserData)
+    {
+        // yes - attempt to store the info
+        return (LPARAM)FastInterlockCompareExchangePointer((PVOID*)pUserData, (PVOID)lNewExtraInfo, (PVOID)lOldExtraInfo);
+    }
+
+    _ASSERTE(!"Shouldn't be trying to call HndCompareExchangeHandleExtraInfo on handle types without extra info");
+    return NULL;
+}
 #endif // !DACCESS_COMPILE
 
 /*
@@ -1386,7 +1410,7 @@ void DEBUG_LogScanningStatistics(HandleTable *pTable, DWORD level)
         // for each generation we've collected,  dump the current stats
         for (int i = 0; i <= pTable->_DEBUG_iMaxGen; i++)
         {
-            __int64 totalBlocksScanned = pTable->_DEBUG_TotalBlocksScanned[i];
+            INT64 totalBlocksScanned = pTable->_DEBUG_TotalBlocksScanned[i];
 
             // dump the generation number and the number of blocks scanned
             LOG((LF_GC, level,     "--------------------------------------------------------------\n"));

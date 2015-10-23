@@ -3068,7 +3068,7 @@ BOOL Module::IsRuntimeWrapExceptions()
         if (hr == S_OK)
         {
             CustomAttributeParser ca(pVal, cbVal);
-            CaNamedArg namedArgs[1];
+            CaNamedArg namedArgs[1] = {{0}};
             
             // First, the void constructor:
             IfFailGo(ParseKnownCaArgs(ca, NULL, 0));
@@ -4467,8 +4467,7 @@ void Module::SetSymbolBytes(LPCBYTE pbSyms, DWORD cbSyms)
                                                 &cbWritten);
     IfFailThrow(HRESULT_FROM_WIN32(dwError));
 
-    // Don't eager load the diasymreader
-
+    ETW::CodeSymbolLog::EmitCodeSymbols(this);
     // Tell the debugger that symbols have been loaded for this
     // module.  We iterate through all domains which contain this
     // module's assembly, and send a debugger notify for each one.

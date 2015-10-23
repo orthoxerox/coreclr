@@ -120,21 +120,8 @@ namespace CorUnix
     needs to be carried out when core PAL subsystems are still active
     --*/
     PAL_ERROR CPalSynchMgrController::PrepareForShutdown()
-    {        
+    {
         return CPalSynchronizationManager::PrepareForShutdown();
-    }
-
-    /*++
-    Method:
-      CPalSynchMgrController::Shutdown
-
-    Synchronization Manager's final shutdown step
-    --*/
-    PAL_ERROR CPalSynchMgrController::Shutdown(
-        CPalThread *pthrCurrent,
-        bool fFullCleanup)
-    {        
-        return CPalSynchronizationManager::Shutdown(pthrCurrent, fFullCleanup);
     }
 
     //////////////////////////////////
@@ -1423,11 +1410,11 @@ namespace CorUnix
                 ptainNode = ptainLocalHead;
                 ptainLocalHead = ptainNode->pNext;
 
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
                 // reset ENTRY nesting level back to zero while 
                 // inside the callback ... 
                 int iOldLevel = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
                 TRACE("Calling APC %p with parameter %#x\n",
                       ptainNode->pfnAPC, ptainNode->pfnAPC);
@@ -1435,10 +1422,10 @@ namespace CorUnix
                 // Actual APC call
                 ptainNode->pfnAPC(ptainNode->pAPCData);
 
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
                 // ... and set nesting level back to what it was
                 DBG_change_entrylevel(iOldLevel);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
                 iAPCsCalled++;
                 m_cacheThreadApcInfoNodes.Add(pthrCurrent, ptainNode);
@@ -1823,56 +1810,6 @@ namespace CorUnix
             s_lInitStatus = SynchMgrStatusReadyForProcessShutDown;
         }
             
-        return palErr;
-    }
-
-    /*++
-    Method:
-      CPalSynchronizationManager::Shutdown
-
-    Synchronization Manager's final shutdown step.
-    Private method, it is called only by CPalSynchMgrController.
-    --*/
-    PAL_ERROR CPalSynchronizationManager::Shutdown(
-        CPalThread *pthrCurrent,
-        bool fFullCleanup)
-    {        
-        PAL_ERROR palErr = NO_ERROR;
-        CPalSynchronizationManager * pSynchManager = GetInstance();
-
-        if ((LONG)SynchMgrStatusReadyForProcessShutDown != s_lInitStatus)
-        {
-            _ASSERT_MSG((LONG)SynchMgrStatusRunning != s_lInitStatus,
-                        "Synchronization Manager: Shutdown called with no "
-                        "prior PrepareForShutdown call");
-            
-            ERROR("Unexpected initialization status found "
-                  "in Shutdown [expected=%d current=%d]\n", 
-                  (int)SynchMgrStatusShuttingDown, s_lInitStatus.Load());
-            palErr = ERROR_INTERNAL_ERROR;
-            goto S_exit;
-        }
-
-        pSynchManager->m_cacheSHRSynchData.Flush(pthrCurrent);
-        pSynchManager->m_cacheSHRWTListNodes.Flush(pthrCurrent);
-
-        if (fFullCleanup)
-        {
-            pSynchManager->m_cacheWaitCtrlrs.Flush(pthrCurrent);
-            pSynchManager->m_cacheStateCtrlrs.Flush(pthrCurrent);
-            pSynchManager->m_cacheSynchData.Flush(pthrCurrent);
-            pSynchManager->m_cacheWTListNodes.Flush(pthrCurrent);
-            pSynchManager->m_cacheThreadApcInfoNodes.Flush(pthrCurrent);
-            pSynchManager->m_cacheOwnedObjectsListNodes.Flush(pthrCurrent);
-
-            InternalDeleteCriticalSection(&s_csSynchProcessLock);            
-            InternalDeleteCriticalSection(&s_csMonitoredProcessesLock);            
-        }
-                   
-        s_lInitStatus = (LONG)SynchMgrStatusIdle;
-        s_pObjSynchMgr = NULL;
-        
-    S_exit:        
         return palErr;
     }
 

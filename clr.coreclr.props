@@ -94,15 +94,16 @@
     <FeatureSvrGc Condition="'$(TargetArch)' != 'arm'">true</FeatureSvrGc>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetsLinux)' == 'true'">
+    <FeatureXplatEventSource>true</FeatureXplatEventSource>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(TargetsUnix)' == 'true'">
     <FeaturePal>true</FeaturePal>
 
     <FeatureStubsAsIL>true</FeatureStubsAsIL>
 
     <ProfilingSupportedBuild>false</ProfilingSupportedBuild>
-
-    <!-- UNIXTODO Enable randomized string hashing -->
-    <FeatureRandomizedStringHashing>false</FeatureRandomizedStringHashing>
 
     <!-- Windows specific features -->
     <FeatureWin32Registry>false</FeatureWin32Registry>

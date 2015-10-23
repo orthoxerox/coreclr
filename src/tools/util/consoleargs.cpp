@@ -340,7 +340,7 @@ void ConsoleArgs::CleanUpArgs()
 bool ConsoleArgs::GetFullFileName(LPCWSTR szSource, __out_ecount(cchFilenameBuffer) LPWSTR filenameBuffer, DWORD cchFilenameBuffer, bool fOutputFilename)
 {
 #ifdef PLATFORM_UNIX
-    WCHAR tempBuffer[MAX_PATH];
+    WCHAR tempBuffer[MAX_LONGPATH];
     memset(filenameBuffer, 0, cchFilenameBuffer * sizeof(WCHAR));
     if (!PathCanonicalizeW(tempBuffer, szSource) ||
         StringCchCopyW(filenameBuffer, cchFilenameBuffer, tempBuffer) != S_OK)
@@ -373,7 +373,7 @@ void ConsoleArgs::SetErrorMessage(__in LPCWSTR pwzMessage)
     {
         delete[] m_lastErrorMessage;
     }
-    m_errorOccured = true;
+    m_errorOccurred = true;
     m_lastErrorMessage = new WCHAR[wcslen(pwzMessage) + 1];
     if (m_lastErrorMessage == nullptr)
     {
@@ -709,7 +709,7 @@ bool ConsoleArgs::ExpandResponseFiles(__in int argc, __deref_in_ecount(argc) con
 
     // Process Response Files
     ProcessResponseArgs();
-    if (m_errorOccured)
+    if (m_errorOccurred)
         return false;
 
     // Now convert to an argc/argv form for remaining processing.
@@ -739,7 +739,7 @@ bool ConsoleArgs::ExpandResponseFiles(__in int argc, __deref_in_ecount(argc) con
 
     *pargc2 = newArgc;
     *pppargv2 = m_rgArgs;
-    return !m_errorOccured;
+    return !m_errorOccurred;
 }
 
 //
@@ -882,10 +882,10 @@ void ConsoleArgs::ProcessResponseArgs()
     HRESULT hr;
     b_tree *response_files = NULL;
 
-    WCHAR szFilename[MAX_PATH];
+    WCHAR szFilename[MAX_LONGPATH];
 
     for (WStrList * listCurArg = m_listArgs;
-         listCurArg != NULL && !m_errorOccured;
+         listCurArg != NULL && !m_errorOccurred;
          listCurArg = listCurArg->next)
     {
         WCHAR * szArg = listCurArg->arg;
@@ -901,7 +901,7 @@ void ConsoleArgs::ProcessResponseArgs()
         }
 
         // Check for duplicates
-        if (!GetFullFileName(&szArg[1], szFilename, MAX_PATH, false))
+        if (!GetFullFileName(&szArg[1], szFilename, MAX_LONGPATH, false))
             continue;
 
         

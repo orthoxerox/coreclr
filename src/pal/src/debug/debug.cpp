@@ -38,6 +38,7 @@ Revision History:
 #include "pal/misc.h"
 #include "pal/malloc.hpp"
 #include "pal/module.h"
+#include "pal/stackstring.hpp"
 #include "pal/virtual.h"
 
 #include <signal.h>
@@ -343,15 +344,29 @@ DebugBreakCommand()
     const char *command_string = getenv (PAL_RUN_ON_DEBUG_BREAK);
     if (command_string) {
         char pid_buf[sizeof (PID_TEXT) + 32];
-        char exe_buf[sizeof (EXE_TEXT) + MAX_PATH + 1];
+        PathCharString exe_bufString;
+        int libNameLength = 10;
+        if (exe_module.lib_name != NULL)
+        {
+            libNameLength = PAL_wcslen(exe_module.lib_name);
+        }
+        
+        SIZE_T dwexe_buf = strlen(EXE_TEXT) + libNameLength + 1;
+        CHAR * exe_buf = exe_bufString.OpenStringBuffer(dwexe_buf);
+        
+        if (NULL == exe_buf)
+        {
+            goto FAILED;
+        }
 
         if (snprintf (pid_buf, sizeof (pid_buf), PID_TEXT "%d", getpid()) <= 0) {
             goto FAILED;
         }
-        if (snprintf (exe_buf, sizeof (exe_buf), EXE_TEXT "%ls", (wchar_t *)exe_module.lib_name) <= 0) {
+        if (snprintf (exe_buf, sizeof (CHAR) * (dwexe_buf + 1), EXE_TEXT "%ls", (wchar_t *)exe_module.lib_name) <= 0) {
             goto FAILED;
         }
 
+        exe_bufString.CloseBuffer(dwexe_buf);
         /* strictly speaking, we might want to only set these environment
            variables in the child process, but if we do that we can't check
            for errors. putenv/setenv can fail when out of memory */
@@ -435,7 +450,6 @@ GetThreadContext(
             ret = CONTEXT_GetThreadContext(
                 GetCurrentProcessId(),
                 pTargetThread->GetPThreadSelf(),
-                pTargetThread->GetLwpId(),
                 lpContext
                 );
         }
@@ -498,7 +512,6 @@ SetThreadContext(
             ret = CONTEXT_SetThreadContext(
                 GetCurrentProcessId(),
                 pTargetThread->GetPThreadSelf(),
-                pTargetThread->GetLwpId(),
                 lpContext
                 );
         }
@@ -1600,7 +1613,7 @@ PAL_CreateExecWatchpoint(
     CPalThread *pTargetThread = NULL;
     IPalObject *pobjThread = NULL;
     int fd = -1;
-    char ctlPath[MAX_PATH];
+    char ctlPath[50];
 
     struct
     {
@@ -1644,6 +1657,7 @@ PAL_CreateExecWatchpoint(
     }
 
     snprintf(ctlPath, sizeof(ctlPath), "/proc/%u/lwp/%u/lwpctl", getpid(), pTargetThread->GetLwpId());
+
     fd = InternalOpen(pThread, ctlPath, O_WRONLY);
     if (-1 == fd)
     {
@@ -1721,7 +1735,7 @@ PAL_DeleteExecWatchpoint(
     CPalThread *pTargetThread = NULL;
     IPalObject *pobjThread = NULL;
     int fd = -1;
-    char ctlPath[MAX_PATH];
+    char ctlPath[50];
 
     struct
     {
@@ -1746,6 +1760,7 @@ PAL_DeleteExecWatchpoint(
     }
 
     snprintf(ctlPath, sizeof(ctlPath), "/proc/%u/lwp/%u/lwpctl", getpid(), pTargetThread->GetLwpId());
+
     fd = InternalOpen(pThread, ctlPath, O_WRONLY);
     if (-1 == fd)
     {

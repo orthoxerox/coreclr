@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 2.8.12.2)
 
+include_directories(SYSTEM /usr/local/include)
+
 include(configure.cmake)
 
 project(coreclrpal)
@@ -16,11 +18,6 @@ endif()
 # Include directories
 
 include_directories(include)
-
-if(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
-  # required for libunwind
-  include_directories("/usr/local/include/")
-endif()
 
 # Compile options
 
@@ -40,6 +37,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
   add_definitions(-D_TARGET_MAC64)
   set(PLATFORM_SOURCES
+    arch/i386/activationhandlerwrapper.S
     arch/i386/context.S
     arch/i386/dispatchexceptionwrapper.S
     exception/machexception.cpp
@@ -137,7 +135,6 @@ set(SOURCES
   misc/error.cpp
   misc/errorstrings.cpp
   misc/fmtmessage.cpp
-  misc/interlock.cpp
   misc/miscpalapi.cpp
   misc/msgbox.cpp
   misc/strutil.cpp
@@ -207,6 +204,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL Linux)
   if(PAL_CMAKE_PLATFORM_ARCH_ARM)
     target_link_libraries(coreclrpal
       gcc_s
+      unwind-arm
+    )
+  endif()
+
+  if(PAL_CMAKE_PLATFORM_ARCH_AMD64)
+    target_link_libraries(coreclrpal
+      unwind-x86_64
     )
   endif()
     
@@ -215,6 +219,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL Linux)
     rt
     dl
     unwind
+    unwind-generic
+    uuid
   )
 endif(CMAKE_SYSTEM_NAME STREQUAL Linux)
 
@@ -243,6 +249,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
 endif(CMAKE_SYSTEM_NAME STREQUAL Darwin)
 
 add_subdirectory(examples)
+
+if(CMAKE_SYSTEM_NAME STREQUAL Linux)
+add_subdirectory(eventprovider)
+endif(CMAKE_SYSTEM_NAME STREQUAL Linux)
 
 # Install the static PAL library for VS
 install (TARGETS coreclrpal DESTINATION lib)

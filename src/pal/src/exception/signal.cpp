@@ -582,9 +582,10 @@ static void inject_activation_handler(int code, siginfo_t *siginfo, void *contex
     // Only accept activations from the current process
     if (siginfo->si_pid == getpid())
     {
-        PAL_ActivationFunction activation = (PAL_ActivationFunction)siginfo->si_value.sival_ptr;
-        if (activation != NULL)
+        if (g_activationFunction != NULL)
         {
+            _ASSERTE(g_safeActivationCheckFunction != NULL);
+
             native_context_t *ucontext = (native_context_t *)context;
 
             CONTEXT winContext;
@@ -593,7 +594,10 @@ static void inject_activation_handler(int code, siginfo_t *siginfo, void *contex
                 &winContext, 
                 CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT);
 
-            activation(&winContext);
+            if (g_safeActivationCheckFunction(winContext.Rip))
+            {
+                g_activationFunction(&winContext);
+            }
 
             // Activation function may have modified the context, so update it.
             CONTEXTToNativeContext(&winContext, ucontext);
@@ -613,12 +617,9 @@ Parameters :
 
 (no return value)
 --*/
-void InjectActivationInternal(CorUnix::CPalThread* pThread, PAL_ActivationFunction activationFunction)
+PAL_ERROR InjectActivationInternal(CorUnix::CPalThread* pThread)
 {
-#if HAVE_PTHREAD_SIGQUEUE
-    sigval value;
-    value.sival_ptr = (void*)activationFunction;
-    int status = pthread_sigqueue(pThread->GetPThreadSelf(), INJECT_ACTIVATION_SIGNAL, value);
+    int status = pthread_kill(pThread->GetPThreadSelf(), INJECT_ACTIVATION_SIGNAL);
     if (status != 0)
     {
         // Failure to send the signal is fatal. There are only two cases when sending
@@ -626,66 +627,8 @@ void InjectActivationInternal(CorUnix::CPalThread* pThread, PAL_ActivationFuncti
         // if the thread doesn't exist anymore.
         abort();
     }
-#else
-    ASSERT("InjectActivationInternal not yet implemented on this platform!");
-#endif
-}
 
-/*++
-Function:
-PAL_InjectActivation
-
-Interrupt the specified thread and have it call the activation function passed in
-
-Parameters:
-hThread            - handle of the target thread
-activationFunction - function to call 
-
-Return: 
-TRUE if it succeeded, FALSE otherwise.
---*/
-BOOL
-PALAPI
-PAL_InjectActivation(
-    IN HANDLE hThread,
-    IN PAL_ActivationFunction pActivationFunction)
-{
-    PERF_ENTRY(PAL_InjectActivation);
-    ENTRY("PAL_InjectActivation(hThread=%p, pActivationFunction=%p)\n", hThread, pActivationFunction);
-
-    CPalThread *pCurrentThread;
-    CPalThread *pTargetThread;
-    IPalObject *pobjThread = NULL;
-
-    pCurrentThread = InternalGetCurrentThread();
-
-    PAL_ERROR palError = InternalGetThreadDataFromHandle(
-        pCurrentThread,
-        hThread,
-        0,
-        &pTargetThread,
-        &pobjThread
-        );
-
-    if (palError == NO_ERROR)
-    {
-        InjectActivationInternal(pTargetThread, pActivationFunction);
-    }
-    else
-    {
-        pCurrentThread->SetLastError(palError);
-    }
-
-    if (pobjThread != NULL)
-    {
-        pobjThread->ReleaseReference(pCurrentThread);
-    }
-
-    BOOL success = (palError == NO_ERROR);
-    LOGEXIT("PAL_InjectActivation returns:d\n", success);
-    PERF_EXIT(PAL_InjectActivation);
-
-    return success;
+    return NO_ERROR;
 }
 
 /*++

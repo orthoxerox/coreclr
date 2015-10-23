@@ -27,7 +27,7 @@ WARNING:   When setting properties based on their current state (for example:
     Name="GetExecuteShFullPath"
     Returns="$(ExecuteShFullPath)">
     <PropertyGroup>
-        <ExecuteShFullPath>$(OutputPath)\$(AssemblyName).sh</ExecuteShFullPath>
+        <ExecuteShFullPath>$(OutputPath)\$(MSBuildProjectName).sh</ExecuteShFullPath>
     </PropertyGroup>
   </Target>
 
@@ -44,7 +44,7 @@ WARNING:   When setting properties based on their current state (for example:
   -->
   <Target Name="GenerateBashExecutionScript"
     Inputs="$(MSBuildProjectFullPath)"
-    Outputs="$(OutputPath)\$(AssemblyName).sh">
+    Outputs="$(OutputPath)\$(MSBuildProjectName).sh">
 
     <PropertyGroup>
     
@@ -56,7 +56,7 @@ echo BEGIN EXECUTION]]>
       </BashCLRTestExitCodePrep>
     
       <BashCLRTestArgPrep Condition=" '$(CLRTestExecutionArguments)'!='' ">
-<![CDATA[CLRTestExecutionArguments=$(CLRTestExecutionArguments)]]>
+<![CDATA[CLRTestExecutionArguments="$(CLRTestExecutionArguments)"]]>
       </BashCLRTestArgPrep>
     
       <!-- By default, be prepared to do a full check -->
@@ -66,18 +66,16 @@ echo Actual: $CLRTestExitCode
 if [ ! $CLRTestExitCode == $CLRTestExpectedExitCode ]
 then
   echo END EXECUTION - FAILED
-  echo FAILED
   exit 1
 else
   echo END EXECUTION - PASSED
-  echo PASSED
   exit 0
 fi
       ]]></BashCLRTestExitCodeCheck>
     </PropertyGroup>
   
     <ItemGroup Condition="$(_CLRTestNeedsToRun)">
-      <Clean Include="$(OutputPath)\$(AssemblyName).sh"/>
+      <Clean Include="$(OutputPath)\$(MSBuildProjectName).sh"/>
 
       <BashCLRTestExecutionScriptArgument Include="debug">
         <HasParam>true</HasParam>
@@ -100,10 +98,10 @@ fi
     
     <PropertyGroup>
       <!-- Calculate the thing we're going to run -->
-      <_CLRTestRunFile Condition="'$(_CLRTestNeedsProjectToRun)' != 'True'">"$(AssemblyName).exe"</_CLRTestRunFile>
+      <_CLRTestRunFile Condition="'$(_CLRTestNeedsProjectToRun)' != 'True'">"$(MSBuildProjectName).exe"</_CLRTestRunFile>
 
       <!-- TODO: make this better? -->
-      <_CLRTestRunFile Condition=" '$(CLRTestIsHosted)'=='true' And !$(_CLRTestNeedsProjectToRun) ">"$Core_Root\mono" $(_CLRTestRunFile)</_CLRTestRunFile>
+      <_CLRTestRunFile Condition=" '$(CLRTestIsHosted)'=='true' And !$(_CLRTestNeedsProjectToRun) ">"$CORE_ROOT/corerun" $(_CLRTestRunFile)</_CLRTestRunFile>
 
       <BashCLRTestLaunchCmds Condition=" '$(BashCLRTestLaunchCmds)'=='' "><![CDATA[
 echo $(_CLRTestRunFile) $CLRTestExecutionArguments $Host_Args
@@ -130,7 +128,6 @@ CLRTestExitCode=$?
     <GenerateParamList ArgumentItems="@(BashCLRTestExecutionScriptArgument)">
       <Output TaskParameter="ParamList" PropertyName="_CLRTestParamList"/>
     </GenerateParamList>
-    
     <PropertyGroup>
       <!--
       This generates the script portion to parse all of the command line arguments.
@@ -168,22 +165,34 @@ done
 
 $(BashCLRTestArgPrep)
       ]]></BashCLRTestArgPrep>
+
       <!-- NOTE! semicolons must be escaped with %3B boooo -->
-      <_CLRTestExecutionScriptText><![CDATA[
+      <_CLRTestExecutionScriptText>
+        <![CDATA[
+# The __TestEnv variable may be used to specify something to run before the test.
+$__TestEnv
+
 $(BashCLRTestArgPrep)
 $(BashCLRTestExitCodePrep)
-# Precommands
-$(_CLRTestPreCommands)
+# PreCommands
+$(_BashCLRTestPreCommands)
 # Launch
 $(BashCLRTestLaunchCmds)
 # PostCommands
-$(_CLRTestPostCommands)
+$(_BashCLRTestPostCommands)
 $(BashCLRTestExitCodeCheck)
-      ]]></_CLRTestExecutionScriptText>
+      ]]>
+      </_CLRTestExecutionScriptText>
+
     </PropertyGroup>
-    <!-- Write the file -->
+
+    <!-- Write the file.
+         Note: under the hood, this will rely on Environment.NewLine for line 
+         endings. This means that if the scripts are being generated on Windows,
+         the line endings will need to be changed from CR-LF to Unix (LF) line 
+         endings before running the scripts on Unix platforms. -->
     <WriteLinesToFile
-      File="$(OutputPath)\$(AssemblyName).sh"
+      File="$(OutputPath)\$(MSBuildProjectName).sh"
       Lines="$(_CLRTestExecutionScriptText)"
       Overwrite="true" />
   </Target>

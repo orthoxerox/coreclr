@@ -76,6 +76,8 @@
 #endif
 #include "tritonstress.h"
 
+#include "argdestination.h"
+
 #ifdef CROSSGEN_COMPILE
 CompilationDomain * theDomain;
 #endif
@@ -759,9 +761,9 @@ HRESULT CEECompileInfo::LoadTypeRefWinRT(
         Assembly *pAssembly;
 
         mdToken tkResolutionScope;
-        pAssemblyImport->GetResolutionScopeOfTypeRef(ref, &tkResolutionScope);
-        
-        if(TypeFromToken(tkResolutionScope) == mdtAssemblyRef)
+        if(FAILED(pAssemblyImport->GetResolutionScopeOfTypeRef(ref, &tkResolutionScope)))
+            hr = S_FALSE;
+        else if(TypeFromToken(tkResolutionScope) == mdtAssemblyRef)
         {
             DWORD dwAssemblyRefFlags;
             IfFailThrow(pAssemblyImport->GetAssemblyRefProps(tkResolutionScope, NULL, NULL,
@@ -1483,7 +1485,8 @@ void FakeGcScanRoots(MetaSig& msig, ArgIterator& argit, MethodDesc * pMD, BYTE *
     int argOffset;
     while ((argOffset = argit.GetNextOffset()) != TransitionBlock::InvalidOffset)
     {
-        msig.GcScanRoots(pFrame + argOffset, &FakePromote, &sc, &FakePromoteCarefully);
+        ArgDestination argDest(pFrame, argOffset, argit.GetArgLocDescForStructInRegs());
+        msig.GcScanRoots(&argDest, &FakePromote, &sc, &FakePromoteCarefully);
     }
 }
 
@@ -1795,13 +1798,13 @@ HRESULT CEECompileInfo::GetMethodDef(CORINFO_METHOD_HANDLE methodHandle,
 // Depends on what things are persisted by CEEPreloader
 
 BOOL CEEPreloader::CanEmbedFunctionEntryPoint(
-        CORINFO_METHOD_HANDLE   methodHandle,
-        CORINFO_METHOD_HANDLE   contextHandle, /* = NULL */
-        CORINFO_ACCESS_FLAGS    accessFlags /*=CORINFO_ACCESS_ANY*/)
+    CORINFO_METHOD_HANDLE   methodHandle,
+    CORINFO_METHOD_HANDLE   contextHandle, /* = NULL */
+    CORINFO_ACCESS_FLAGS    accessFlags /*=CORINFO_ACCESS_ANY*/)
 {
     STANDARD_VM_CONTRACT;
 
-    MethodDesc * pMethod  = GetMethod(methodHandle);
+    MethodDesc * pMethod = GetMethod(methodHandle);
     MethodDesc * pContext = GetMethod(contextHandle);
 
     // IsRemotingInterceptedViaVirtualDispatch is a rather special case.
@@ -1818,11 +1821,18 @@ BOOL CEEPreloader::CanEmbedFunctionEntryPoint(
     // don't save these stubs.  Unlike most other remoting stubs these ones 
     // are NOT inserted by DoPrestub.
     //
-    if (((accessFlags & CORINFO_ACCESS_THIS) == 0)       &&
-        (pMethod->IsRemotingInterceptedViaVirtualDispatch())    )
+    if (((accessFlags & CORINFO_ACCESS_THIS) == 0) &&
+        (pMethod->IsRemotingInterceptedViaVirtualDispatch()))
     {
         return FALSE;
     }
+
+    // Methods with native callable attribute are special , since 
+    // they are used as LDFTN targets.Native Callable methods
+    // uses the same code path as reverse pinvoke and embedding them
+    // in an ngen image require saving the reverse pinvoke stubs.
+    if (pMethod->HasNativeCallableAttribute())
+        return FALSE;
 
     return TRUE;
 }
@@ -1864,6 +1874,14 @@ BOOL CEEPreloader::DoesMethodNeedRestoringBeforePrestubIsRun(
     }
 
     return FALSE;
+}
+
+BOOL CEECompileInfo::IsNativeCallableMethod(CORINFO_METHOD_HANDLE handle)
+{
+    WRAPPER_NO_CONTRACT;
+
+    MethodDesc * pMethod = GetMethod(handle);
+    return pMethod->HasNativeCallableAttribute();
 }
 
 BOOL CEEPreloader::CanSkipDependencyActivation(CORINFO_METHOD_HANDLE   context,
@@ -1918,7 +1936,17 @@ BOOL CanDeduplicateCode(CORINFO_METHOD_HANDLE method, CORINFO_METHOD_HANDLE dupl
         return FALSE;
 #endif // _TARGET_X86_
 
-    if (pMethod->ReturnsObject() != pDuplicateMethod->ReturnsObject())
+    MetaSig::RETURNTYPE returnType = pMethod->ReturnsObject();
+    MetaSig::RETURNTYPE returnTypeDuplicate = pDuplicateMethod->ReturnsObject();
+
+    if (returnType != returnTypeDuplicate)
+        return FALSE;
+
+    //
+    // Do not enable deduplication of structs returned in registers
+    //
+
+    if (returnType == MetaSig::RETVALUETYPE)
         return FALSE;
 
     //

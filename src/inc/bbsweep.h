@@ -277,8 +277,8 @@ private:
             }
 #endif // !FEATURE_CORESYSTEM
 
-            WCHAR objectName[MAX_LONGPATH];
-            WCHAR objectNamePrefix[MAX_LONGPATH];
+            WCHAR objectName[MAX_LONGPATH] = {0};
+            WCHAR objectNamePrefix[MAX_LONGPATH] = {0};
             GetObjectNamePrefix(processID, fromRuntime, objectNamePrefix);
             // if there is a non-empty name prefix, append a '\'
             if (objectNamePrefix[0] != '\0')
@@ -337,7 +337,7 @@ cleanup:
     void GetObjectNamePrefix(DWORD processID, BOOL fromRuntime, __inout_z WCHAR* objectNamePrefix)
     {
         // default prefix
-        swprintf_s(objectNamePrefix, MAX_PATH, W("Global"));
+        swprintf_s(objectNamePrefix, MAX_LONGPATH, W("Global"));
 #ifndef FEATURE_PAL
         //
         // This method can be called:

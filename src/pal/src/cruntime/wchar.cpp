@@ -1450,7 +1450,7 @@ PAL_wcsncat( wchar_16 * strDest, const wchar_16 *strSource, size_t count )
 static BOOL MISC_CRT_WCSTOD_IsValidCharacter( WCHAR c )
 {
     if ( c == '+' || c == '-' || c == '.' || ( c >= '0' && c <= '9' ) || 
-         c == 'e' || c == 'E' || c == 'd' || c == 'd' )
+         c == 'e' || c == 'E' || c == 'd' || c == 'D' )
     {
         return TRUE;
     }
@@ -1527,7 +1527,7 @@ PAL_wcstod( const wchar_16 * nptr, wchar_16 **endptr )
                 /* See if strtod failed. */
                 if ( RetVal == 0.0 && ScanStop == lpStringRep )
                 {
-                    ASSERT( "An error occured in the conversion.\n" );
+                    ASSERT( "An error occurred in the conversion.\n" );
                     lpEndOfExpression = (LPWSTR)nptr;
                 }
             }

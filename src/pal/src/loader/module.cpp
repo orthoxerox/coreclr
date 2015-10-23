@@ -34,6 +34,7 @@ Abstract:
 #include "pal/misc.h"
 #include "pal/virtual.h"
 #include "pal/map.hpp"
+#include "pal/stackstring.hpp"
 
 #include <sys/param.h>
 #include <errno.h>
@@ -92,12 +93,22 @@ CRITICAL_SECTION module_critsec;
 MODSTRUCT exe_module; 
 MODSTRUCT *pal_module = NULL;
 
-char g_szCoreCLRPath[MAX_LONGPATH] = { 0 };
+char * g_szCoreCLRPath = NULL;
+size_t g_cbszCoreCLRPath = MAX_LONGPATH * sizeof(char);
 
+int MaxWCharToAcpLength = 3;
 /* static function declarations ***********************************************/
+
+template<class TChar> bool LOADVerifyLibraryPath(const TChar *libraryPath);
+bool LOADConvertLibraryPathWideStringToMultibyteString(
+    LPCWSTR wideLibraryPath,
+    LPSTR multibyteLibraryPath,
+    INT *multibyteLibraryPathLengthRef);
 
 static BOOL LOADValidateModule(MODSTRUCT *module);
 static LPWSTR LOADGetModuleFileName(MODSTRUCT *module);
+static HMODULE LOADLoadLibraryDirect(LPCSTR libraryNameOrPath, bool setLastError);
+static HMODULE LOADRegisterLibraryDirect(HMODULE dl_handle, LPCSTR libraryNameOrPath, BOOL fDynamic);
 static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic);
 static void LOAD_SEH_CallDllMain(MODSTRUCT *module, DWORD dwReason, LPVOID lpReserved);
 static MODSTRUCT *LOADAllocModule(void *dl_handle, LPCSTR name);
@@ -161,17 +172,8 @@ LoadLibraryExA(
           (lpLibFileName)?lpLibFileName:"NULL",
           (lpLibFileName)?lpLibFileName:"NULL");
 
-    if (NULL == lpLibFileName)
+    if (!LOADVerifyLibraryPath(lpLibFileName))
     {
-        ERROR("lpLibFileName is NULL;Exit.\n");
-        SetLastError(ERROR_MOD_NOT_FOUND);
-        goto Done;
-    }
-
-    if (lpLibFileName[0]=='\0')
-    {
-        ERROR("can't load library with NULL file name...\n");
-        SetLastError(ERROR_INVALID_PARAMETER);
         goto Done;
     }
 
@@ -221,8 +223,9 @@ LoadLibraryExW(
         return NULL;
     }
     
-    CHAR lpstr[MAX_LONGPATH];
+    CHAR * lpstr;
     INT name_length;
+    PathCharString pathstr;
     HMODULE hModule = NULL;
 
     PERF_ENTRY(LoadLibraryExW);
@@ -230,40 +233,24 @@ LoadLibraryExW(
           lpLibFileName?lpLibFileName:W16_NULLSTRING,
           lpLibFileName?lpLibFileName:W16_NULLSTRING);
 
-    if (NULL == lpLibFileName)
+    if (!LOADVerifyLibraryPath(lpLibFileName))
     {
-        ERROR("lpLibFileName is NULL;Exit.\n");
-        SetLastError(ERROR_MOD_NOT_FOUND);
         goto done;
     }
 
-    if (lpLibFileName[0]==0)
+    lpstr = pathstr.OpenStringBuffer((PAL_wcslen(lpLibFileName)+1) * MaxWCharToAcpLength);
+    if (NULL == lpstr)
     {
-        ERROR("Can't load library with NULL file name...\n");
-        SetLastError(ERROR_INVALID_PARAMETER);
+        goto done;
+    }
+    if (!LOADConvertLibraryPathWideStringToMultibyteString(lpLibFileName, lpstr, &name_length))
+    {
         goto done;
     }
 
     /* do the Dos/Unix conversion on our own copy of the name */
-
-    name_length = WideCharToMultiByte(CP_ACP, 0, lpLibFileName, -1, lpstr,
-                                      MAX_LONGPATH, NULL, NULL);
-    if (name_length == 0)
-    {
-        DWORD dwLastError = GetLastError();
-        if (dwLastError == ERROR_INSUFFICIENT_BUFFER)
-        {
-            ERROR("lpLibFileName is larger than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
-        }
-        else
-        {
-            ASSERT("WideCharToMultiByte failure! error is %d\n", dwLastError);
-        }
-        SetLastError(ERROR_INVALID_PARAMETER);
-        goto done;
-    }
-
     FILEDosToUnixPathA(lpstr);
+    pathstr.CloseBuffer(name_length);
 
     /* let LOADLoadLibrary call SetLastError in case of failure */
     hModule = LOADLoadLibrary(lpstr, TRUE);
@@ -271,6 +258,111 @@ LoadLibraryExW(
 done:
     LOGEXIT("LoadLibraryExW returns HMODULE %p\n", hModule);
     PERF_EXIT(LoadLibraryExW);
+    return hModule;
+}
+
+/*
+Function:
+LoadLibraryDirect
+
+Loads a library using a system call, without registering the library with the module list.
+
+Returns the system handle to the loaded library, or nullptr upon failure (error is set via SetLastError()).
+*/
+HMODULE
+PALAPI
+PAL_LoadLibraryDirect(
+    IN LPCWSTR lpLibFileName)
+{
+    PathCharString pathstr;
+    CHAR * lpstr = NULL;
+    INT name_length;
+    HMODULE hModule = NULL;
+
+    PERF_ENTRY(LoadLibraryDirect);
+    ENTRY("LoadLibraryDirect (lpLibFileName=%p (%S)) \n",
+          lpLibFileName?lpLibFileName:W16_NULLSTRING,
+          lpLibFileName?lpLibFileName:W16_NULLSTRING);
+
+    if (!LOADVerifyLibraryPath(lpLibFileName))
+    {
+        goto done;
+    }
+    
+    lpstr = pathstr.OpenStringBuffer((PAL_wcslen(lpLibFileName)+1) * MaxWCharToAcpLength);
+    if (NULL == lpstr)
+    {
+        goto done;
+    }
+    if (!LOADConvertLibraryPathWideStringToMultibyteString(lpLibFileName, lpstr, &name_length))
+    {
+        goto done;
+    }
+
+    /* do the Dos/Unix conversion on our own copy of the name */
+    FILEDosToUnixPathA(lpstr);
+    pathstr.CloseBuffer(name_length);
+
+    /* let LOADLoadLibraryDirect call SetLastError in case of failure */
+    hModule = LOADLoadLibraryDirect(lpstr, true /* setLastError */);
+
+done:
+    LOGEXIT("LoadLibraryDirect returns HMODULE %p\n", hModule);
+    PERF_EXIT(LoadLibraryDirect);
+    return hModule;
+}
+
+/*
+Function:
+RegisterLibraryDirect
+
+Registers a system handle to a loaded library with the module list.
+
+Returns a PAL handle to the loaded library, or nullptr upon failure (error is set via SetLastError()).
+*/
+HMODULE
+PALAPI
+PAL_RegisterLibraryDirect(
+    IN HMODULE dl_handle,
+    IN LPCWSTR lpLibFileName)
+{
+    PathCharString pathstr;
+    CHAR * lpstr = NULL;
+    INT name_length;
+    HMODULE hModule = NULL;
+
+    PERF_ENTRY(RegisterLibraryDirect);
+    ENTRY("RegisterLibraryDirect (lpLibFileName=%p (%S)) \n",
+        lpLibFileName ? lpLibFileName : W16_NULLSTRING,
+        lpLibFileName ? lpLibFileName : W16_NULLSTRING);
+
+    if (!LOADVerifyLibraryPath(lpLibFileName))
+    {
+        goto done;
+    }
+
+    lpstr = pathstr.OpenStringBuffer((PAL_wcslen(lpLibFileName)+1) * MaxWCharToAcpLength);
+    if (NULL == lpstr)
+    {
+        goto done;
+    }
+    if (!LOADConvertLibraryPathWideStringToMultibyteString(lpLibFileName, lpstr, &name_length))
+    {
+        goto done;
+    }
+
+    /* do the Dos/Unix conversion on our own copy of the name */
+    FILEDosToUnixPathA(lpstr);
+    pathstr.CloseBuffer(name_length);
+
+    /* let LOADRegisterLibraryDirect call SetLastError in case of failure */
+    LockModuleList();
+    hModule = LOADRegisterLibraryDirect(dl_handle, lpstr, true /* fDynamic */);
+    UnlockModuleList();
+
+done:
+    LOGEXIT("RegisterLibraryDirect returns HMODULE %p\n", hModule);
+    PERF_EXIT(RegisterLibraryDirect);
     return hModule;
 }
 
@@ -472,11 +564,11 @@ FreeLibrary(
                 module->lib_name ? module->lib_name : W16_NULLSTRING);
 
 /* reset ENTRY nesting level back to zero while inside the callback... */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
     {
         int old_level;
         old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
     
         {
             // This module may be foreign to our PAL, so leave our PAL.
@@ -494,10 +586,10 @@ FreeLibrary(
             }
         }
 /* ...and set nesting level back to what it was */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
         DBG_change_entrylevel(old_level);
     }
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
     }
 
     if (module->dl_handle && 0 != dlclose(module->dl_handle))
@@ -1069,11 +1161,11 @@ void LOADCallDllMain(DWORD dwReason, LPVOID lpReserved)
         {
             if (module->pDllMain)
             {
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
                 /* reset ENTRY nesting level back to zero while inside the callback... */
                 int old_level;
                 old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
                 {
                     // This module may be foreign to our PAL, so leave our PAL.
@@ -1082,10 +1174,10 @@ void LOADCallDllMain(DWORD dwReason, LPVOID lpReserved)
                     module->pDllMain(module->hinstance, dwReason, lpReserved);
                 }
 
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
                 /* ...and set nesting level back to what it was */
                 DBG_change_entrylevel(old_level);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
             }
         }
 
@@ -1146,6 +1238,55 @@ done_nolock:
 
 
 /* Static function definitions ************************************************/
+
+// Checks the library path for null or empty string. On error, calls SetLastError() and returns false.
+template<class TChar>
+bool LOADVerifyLibraryPath(const TChar *libraryPath)
+{
+    if (libraryPath == nullptr)
+    {
+        ERROR("libraryPath is null\n");
+        SetLastError(ERROR_MOD_NOT_FOUND);
+        return false;
+    }
+    if (libraryPath[0] == '\0')
+    {
+        ERROR("libraryPath is empty\n");
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+    return true;
+}
+
+// Converts the wide char library path string into a multibyte-char string. On error, calls SetLastError() and returns false.
+bool LOADConvertLibraryPathWideStringToMultibyteString(
+    LPCWSTR wideLibraryPath,
+    LPSTR multibyteLibraryPath,
+    INT *multibyteLibraryPathLengthRef)
+{
+    _ASSERTE(multibyteLibraryPathLengthRef != nullptr);
+    _ASSERTE(wideLibraryPath != nullptr);
+
+    size_t length = (PAL_wcslen(wideLibraryPath)+1) * MaxWCharToAcpLength;
+    *multibyteLibraryPathLengthRef = WideCharToMultiByte(CP_ACP, 0, wideLibraryPath, -1, multibyteLibraryPath,
+                                                        length, nullptr, nullptr);
+    
+    if (*multibyteLibraryPathLengthRef == 0)
+    {
+        DWORD dwLastError = GetLastError();
+        if (dwLastError == ERROR_INSUFFICIENT_BUFFER)
+        {
+            ERROR("wideLibraryPath converted to a multibyte string is longer than MAX_LONGPATH (%d)!\n", MAX_LONGPATH);
+        }
+        else
+        {
+            ASSERT("WideCharToMultiByte failure! error is %d\n", dwLastError);
+        }
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+    return true;
+}
 
 /*++
 Function :
@@ -1295,88 +1436,60 @@ static MODSTRUCT *LOADAllocModule(void *dl_handle, LPCSTR name)
     return module;
 }
 
-/*++
-Function :
-    LOADLoadLibrary [internal]
+/*
+Function:
+    LOADLoadLibraryDirect [internal]
 
-    implementation of LoadLibrary (for use by the A/W variants)
+    Loads a library using a system call, without registering the library with the module list.
 
-Parameters :
-    LPSTR shortAsciiName : name of module as specified to LoadLibrary
+Parameters:
+    LPCSTR libraryNameOrPath:           The library to load.
+    bool setLastError:                  True to set the last error upon failure, false otherwise.
 
-    BOOL fDynamic : TRUE if dynamic load through LoadLibrary, FALSE if static load through RegisterLibrary
-
-Return value :
-    handle to loaded module
-
---*/
-static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
+Return value:
+    System handle to the loaded library, or nullptr upon failure (error is set via SetLastError() if 'setLastError' is true).
+*/
+static HMODULE LOADLoadLibraryDirect(LPCSTR libraryNameOrPath, bool setLastError)
 {
-    CHAR fullLibraryName[MAX_LONGPATH];
-    MODSTRUCT *module = NULL;
-    void *dl_handle = NULL;
-    DWORD dwError;
-    DWORD retval;
+    _ASSERTE(libraryNameOrPath != nullptr);
+    _ASSERTE(libraryNameOrPath[0] != '\0');
 
-    // Check whether we have been requested to load 'libc'. If that's the case then use the
-    // full name of the library that is defined in <gnu/lib-names.h> by the LIBC_SO constant.
-    // The problem is that calling dlopen("libc.so") will fail for libc even thought it works
-    // for other libraries. The reason is that libc.so is just linker script (i.e. a test file).
-    // As a result, we have to use the full name (i.e. lib.so.6) that is defined by LIBC_SO.
-    if (strcmp(shortAsciiName, LIBC_NAME_WITHOUT_EXTENSION) == 0)
+    HMODULE dl_handle = dlopen(libraryNameOrPath, RTLD_LAZY);
+    if (dl_handle != nullptr)
     {
-#if defined(__APPLE__)
-        shortAsciiName = "libc.dylib";
-#elif defined(__FreeBSD__)
-        shortAsciiName = FREEBSD_LIBC;
-#else
-        shortAsciiName = LIBC_SO;
-#endif
+        TRACE("dlopen() found module %s\n", libraryNameOrPath);
     }
-
-    LockModuleList();
-
-    // See if file can be dlopen()ed; this should work even if it's already loaded
+    else if (setLastError)
     {
-        // See GetProcAddress for an explanation why we leave the PAL.
-        PAL_LeaveHolder holder; 
-        
-        // P/Invokes are often declared with variations on the actual library name.
-        // For example, it's common to leave off the extension/suffix of the library
-        // even if it has one, or to leave off a prefix like "lib" even if it has one
-        // (both of these are done typically to smooth over cross-platform differences). 
-        // We try to dlopen with such variations on the original.
-        const char* const formatStrings[4] = // used with args: PAL_SHLIB_PREFIX, shortAsciiName, PAL_SHLIB_SUFFIX
-        {
-            "%s%s%s",     // prefix+name+suffix
-            "%.0s%s%.0s", // name
-            "%.0s%s%s",   // name+suffix
-            "%s%s%.0s",   // prefix+name
-        };
-        const int skipPrefixing = strchr(shortAsciiName, '/') != NULL; // skip prefixing if the name is actually a path
-        for (int i = 0; i < 4; i++)
-        {
-           if (skipPrefixing && (i == 0 || i == 3)) // 0th and 3rd strings include prefixes
-               continue;
-           
-            if (!dl_handle &&
-                snprintf(fullLibraryName, MAX_LONGPATH, formatStrings[i], PAL_SHLIB_PREFIX, shortAsciiName, PAL_SHLIB_SUFFIX) < MAX_LONGPATH &&
-                ((dl_handle = dlopen(fullLibraryName, RTLD_LAZY | RTLD_NOLOAD)) || 
-                 (dl_handle = dlopen(fullLibraryName, RTLD_LAZY))))
-            {
-                shortAsciiName = fullLibraryName;
-                break;
-            }
-        }
-    }
-
-    if (!dl_handle)
-    {
-        WARN("dlopen() failed; dlerror says '%s'\n", dlerror()); 
+        WARN("dlopen() failed; dlerror says '%s'\n", dlerror());
         SetLastError(ERROR_MOD_NOT_FOUND);
-        goto done;
     }
-    TRACE("dlopen() found module %s\n", shortAsciiName);
+
+    return dl_handle;
+}
+
+/*
+Function:
+    LOADRegisterLibraryDirect [internal]
+
+    Registers a system handle to a loaded library with the module list.
+
+Parameters:
+    HMODULE dl_handle:                  System handle to the loaded library.
+    LPCSTR libraryNameOrPath:           The library that was loaded.
+    BOOL fDynamic:                      TRUE if dynamic load through LoadLibrary, FALSE if static load through RegisterLibrary.
+
+Return value:
+    PAL handle to the loaded library, or nullptr upon failure (error is set via SetLastError()).
+*/
+static HMODULE LOADRegisterLibraryDirect(HMODULE dl_handle, LPCSTR libraryNameOrPath, BOOL fDynamic)
+{
+    _ASSERTE(dl_handle != nullptr);
+    _ASSERTE(libraryNameOrPath != nullptr);
+    _ASSERTE(libraryNameOrPath[0] != '\0');
+
+    MODSTRUCT *module;
+    DWORD dwError;
 
 #if !RETURNS_NEW_HANDLES_ON_REPEAT_DLOPEN
     /* search module list for a match. */
@@ -1388,25 +1501,25 @@ static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
             /* found the handle. increment the refcount and return the 
                existing module structure */
             TRACE("Found matching module %p for module name %s\n",
-                 module, shortAsciiName);
+                 module, libraryNameOrPath);
             if (module->refcount != -1)
                 module->refcount++;
             dlclose(dl_handle);
-            goto done;
+            return module;
         }
         module = module->next;
     } while (module != &exe_module);
 #endif
 
-    TRACE("Module doesn't exist : creating %s.\n", shortAsciiName);
-    module = LOADAllocModule(dl_handle, shortAsciiName);
+    TRACE("Module doesn't exist : creating %s.\n", libraryNameOrPath);
+    module = LOADAllocModule(dl_handle, libraryNameOrPath);
 
     if (NULL == module)
     {
         ERROR("couldn't create new module\n");
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
         dlclose(dl_handle);
-        goto done;
+        return nullptr;
     }
 
     /* Add the new module on to the end of the list */
@@ -1441,7 +1554,7 @@ static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
             PREGISTER_MODULE registerModule = (PREGISTER_MODULE)dlsym(module->dl_handle, "PAL_RegisterModule");
             if (registerModule)
             {
-                module->hinstance = registerModule(shortAsciiName);
+                module->hinstance = registerModule(libraryNameOrPath);
             }
             else
             {
@@ -1452,35 +1565,36 @@ static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
             }
         }
 
+        BOOL dllMainRetVal;
         {
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
             /* reset ENTRY nesting level back to zero while inside the callback... */
             int old_level;
             old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
             {
                 // This module may be foreign to our PAL, so leave our PAL.
                 // If it depends on us, it will re-enter.
                 PAL_LeaveHolder holder;
-                retval = module->pDllMain(module->hinstance, DLL_PROCESS_ATTACH, fDynamic ? NULL : (LPVOID)-1);
+                dllMainRetVal = module->pDllMain(module->hinstance, DLL_PROCESS_ATTACH, fDynamic ? NULL : (LPVOID)-1);
             }
 
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
             /* ...and set nesting level back to what it was */
             DBG_change_entrylevel(old_level);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
         }
 
         // If DlMain(DLL_PROCESS_ATTACH) returns FALSE, we must immediately unload the module
-        if (!retval)
+        if (!dllMainRetVal)
         {
             ERROR("DllMain returned FALSE; unloading module.\n");
             module->pDllMain = NULL;
             FreeLibrary((HMODULE)module);
             SetLastError(ERROR_DLL_INIT_FAILED);
             module = NULL;
-            goto done;
+            return nullptr;
         }
     }
     else
@@ -1488,9 +1602,67 @@ static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
         TRACE("Module does not contain a DllMain function.\n");
     }
 
+    return module;
+}
+
+/*++
+Function :
+    LOADLoadLibrary [internal]
+
+    implementation of LoadLibrary (for use by the A/W variants)
+
+Parameters :
+    LPSTR shortAsciiName : name of module as specified to LoadLibrary
+
+    BOOL fDynamic : TRUE if dynamic load through LoadLibrary, FALSE if static load through RegisterLibrary
+
+Return value :
+    handle to loaded module
+
+--*/
+static HMODULE LOADLoadLibrary(LPCSTR shortAsciiName, BOOL fDynamic)
+{
+    HMODULE module = NULL;
+    HMODULE dl_handle = NULL;
+
+    // Check whether we have been requested to load 'libc'. If that's the case then use the
+    // full name of the library that is defined in <gnu/lib-names.h> by the LIBC_SO constant.
+    // The problem is that calling dlopen("libc.so") will fail for libc even thought it works
+    // for other libraries. The reason is that libc.so is just linker script (i.e. a test file).
+    // As a result, we have to use the full name (i.e. lib.so.6) that is defined by LIBC_SO.
+    if (strcmp(shortAsciiName, LIBC_NAME_WITHOUT_EXTENSION) == 0)
+    {
+#if defined(__APPLE__)
+        shortAsciiName = "libc.dylib";
+#elif defined(__FreeBSD__)
+        shortAsciiName = FREEBSD_LIBC;
+#else
+        shortAsciiName = LIBC_SO;
+#endif
+    }
+
+    LockModuleList();
+
+    // See if file can be dlopen()ed; this should work even if it's already loaded
+    {
+        // See GetProcAddress for an explanation why we leave the PAL.
+        PAL_LeaveHolder holder;
+
+        dl_handle = LOADLoadLibraryDirect(shortAsciiName, false /* setLastError */);
+    }
+
+    if (!dl_handle)
+    {
+        WARN("dlopen() failed; dlerror says '%s'\n", dlerror()); 
+        SetLastError(ERROR_MOD_NOT_FOUND);
+        goto done;
+    }
+
+    module = LOADRegisterLibraryDirect(dl_handle, shortAsciiName, fDynamic);
+
 done:
     UnlockModuleList();
-    return (HMODULE)module;
+    return module;
 }
 
 /*++
@@ -1521,10 +1693,10 @@ we're terminating anyway.
 */
 static void LOAD_SEH_CallDllMain(MODSTRUCT *module, DWORD dwReason, LPVOID lpReserved)
 {
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
     /* reset ENTRY nesting level back to zero while inside the callback... */
     int old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
     
     struct Param
     {
@@ -1556,10 +1728,10 @@ static void LOAD_SEH_CallDllMain(MODSTRUCT *module, DWORD dwReason, LPVOID lpRes
     }
     PAL_ENDTRY
 
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
     /* ...and set nesting level back to what it was */
     DBG_change_entrylevel(old_level);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 }
 
 /*++
@@ -1735,7 +1907,19 @@ MODSTRUCT *LOADGetPalLibrary()
         }
         // Stash a copy of the CoreCLR installation path in a global variable.
         // Make sure it's terminated with a slash.
-        if (strcpy_s(g_szCoreCLRPath, sizeof(g_szCoreCLRPath), info.dli_fname) != SAFECRT_SUCCESS)
+        if (g_szCoreCLRPath == NULL)
+        {
+            CPalThread* pThread = InternalGetCurrentThread();
+            g_szCoreCLRPath = (char*) InternalMalloc(pThread, g_cbszCoreCLRPath);
+
+            if (g_szCoreCLRPath == NULL)
+            {
+                ERROR("LOADGetPalLibrary: InternalMalloc failed!");
+                goto exit;
+            }
+        }
+        
+        if (strcpy_s(g_szCoreCLRPath, g_cbszCoreCLRPath, info.dli_fname) != SAFECRT_SUCCESS)
         {
             ERROR("LOADGetPalLibrary: strcpy_s failed!");
             goto exit;

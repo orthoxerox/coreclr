@@ -207,6 +207,7 @@ set(VM_SOURCES_WKS
     listlock.cpp
     managedmdimport.cpp
     marshalnative.cpp
+    marvin32.cpp
     mdaassistants.cpp
     message.cpp
     methodtablebuilder.cpp
@@ -264,6 +265,12 @@ set(VM_SOURCES_WKS
     weakreferencenative.cpp
 )
 
+if(CLR_CMAKE_PLATFORM_LINUX OR WIN32)
+    list(APPEND VM_SOURCES_WKS
+        eventtrace.cpp
+        )
+endif(CLR_CMAKE_PLATFORM_LINUX OR WIN32)
+
 if(WIN32)
 
 set(VM_SOURCES_DAC_AND_WKS_WIN32
@@ -276,7 +283,6 @@ set(VM_SOURCES_DAC_AND_WKS_WIN32
 
 list(APPEND VM_SOURCES_WKS 
     ${VM_SOURCES_DAC_AND_WKS_WIN32}
-    marvin32.cpp # move out of win32 when FEATURE_RANDOMIZED_STRING_HASHING is enabled for linux
     # These should not be included for Linux
     appxutil.cpp
     assemblynativeresource.cpp
@@ -293,7 +299,6 @@ list(APPEND VM_SOURCES_WKS
     dispparammarshaler.cpp
     dwreport.cpp
     eventreporter.cpp
-    eventtrace.cpp
     extensibleclassfactory.cpp
     microsoft.comservices_i.c
     mngstdinterfaces.cpp

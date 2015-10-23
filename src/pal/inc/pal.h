@@ -5,14 +5,6 @@
 
 /*++
 
-
-
- This file includes parts which are Copyright (c) 1982-1986 Regents
- of the University of California.  All rights reserved.  The
- Berkeley Software License Agreement specifies the terms and
- conditions for redistribution.
-
-
 Module Name:
 
     pal.h
@@ -498,6 +490,26 @@ typedef long time_t;
 
 typedef DWORD (PALAPI *PTHREAD_START_ROUTINE)(LPVOID lpThreadParameter);
 typedef PTHREAD_START_ROUTINE LPTHREAD_START_ROUTINE;
+
+
+/******************* Tracing Initialization *******************************/
+
+#if defined(__LINUX__)
+
+// Constructor priority is set to 200, which allows for constructors to
+// guarantee that they run before or after this constructor by setting
+// their priority appropriately.
+
+// Priority values must be greater than 100.  The lower the value,
+// the higher the priority.
+static
+void
+__attribute__((__unused__))
+__attribute__((constructor (200)))
+PAL_InitializeTracing(void);
+
+#endif
+
 
 /******************* PAL-Specific Entrypoints *****************************/
 
@@ -3442,6 +3454,15 @@ size_t
 PALAPI
 PAL_GetLogicalProcessorCacheSizeFromOS();
 
+typedef BOOL (*ReadMemoryWordCallback)(SIZE_T address, SIZE_T *value);
+
+PALIMPORT BOOL PALAPI PAL_VirtualUnwind(CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *contextPointers);
+
+PALIMPORT BOOL PALAPI PAL_VirtualUnwindOutOfProc(CONTEXT *context, 
+                                                 KNONVOLATILE_CONTEXT_POINTERS *contextPointers, 
+                                                 DWORD pid, 
+                                                 ReadMemoryWordCallback readMemCallback);
+
 #define GetLogicalProcessorCacheSizeFromOS PAL_GetLogicalProcessorCacheSizeFromOS
 
 #ifdef PLATFORM_UNIX
@@ -3648,6 +3669,19 @@ LoadLibraryExW(
         IN LPCWSTR lpLibFileName,
         IN /*Reserved*/ HANDLE hFile,
         IN DWORD dwFlags);
+
+PALIMPORT
+HMODULE
+PALAPI
+PAL_LoadLibraryDirect(
+         IN LPCWSTR lpLibFileName);
+
+PALIMPORT
+HMODULE
+PALAPI
+PAL_RegisterLibraryDirect(
+         IN HMODULE dl_handle,
+         IN LPCWSTR lpLibFileName);
 
 /*++
 Function:
@@ -3868,14 +3902,6 @@ HeapCreate(
 	       IN DWORD flOptions,
 	       IN SIZE_T dwInitialSize,
 	       IN SIZE_T dwMaximumSize);
-
-PALIMPORT
-SIZE_T
-PALAPI
-HeapSize(
-    HANDLE hHeap,
-    DWORD dwFlags,
-    LPCVOID lpMem);
 
 PALIMPORT
 LPVOID
@@ -5192,132 +5218,353 @@ typedef EXCEPTION_DISPOSITION (PALAPI *PVECTORED_EXCEPTION_HANDLER)(
 // significant set bit, or 0 if if mask is zero.
 //
 // The same is true for BitScanForward, except that the GCC function is __builtin_ffs.
-
+EXTERN_C
 PALIMPORT
+inline
 unsigned char
 PALAPI
 BitScanForward(
-             IN OUT PDWORD Index,
-             IN UINT qwMask);
+    IN OUT PDWORD Index,
+    IN UINT qwMask)
+{
+    unsigned char bRet = FALSE;
+    int iIndex = __builtin_ffsl(qwMask);
+    if (iIndex != 0)
+    {
+        // Set the Index after deducting unity
+        *Index = (DWORD)(iIndex - 1);
+        bRet = TRUE;
+    }
 
-PALIMPORT
-LONG
-PALAPI
-InterlockedIncrement(
-             IN OUT LONG volatile *lpAddend);
+    return bRet;
+}
 
+EXTERN_C
 PALIMPORT
-LONG
-PALAPI
-InterlockedDecrement(
-             IN OUT LONG volatile *lpAddend);
-
-PALIMPORT
-LONG
-PALAPI
-InterlockedExchange(
-            IN OUT LONG volatile *Target,
-            IN LONG Value);
-
-PALIMPORT
-LONG
-PALAPI
-InterlockedCompareExchange(
-               IN OUT LONG volatile *Destination,
-               IN LONG Exchange,
-               IN LONG Comperand);
-
-PALIMPORT
-LONG
-PALAPI
-InterlockedCompareExchangeAcquire(
-               IN OUT LONG volatile *Destination,
-               IN LONG Exchange,
-               IN LONG Comperand);
-
-PALIMPORT
-LONG
-PALAPI
-InterlockedCompareExchangeRelease(
-               IN OUT LONG volatile *Destination,
-               IN LONG Exchange,
-               IN LONG Comperand);
-               
-PALIMPORT
-LONG
-PALAPI
-InterlockedExchangeAdd(
-               IN OUT LONG volatile *Addend,
-               IN LONG Value);
-               
-PALIMPORT
-LONG
-PALAPI
-InterlockedAnd(
-               IN OUT LONG volatile *Destination,
-               IN LONG Value);
-
-PALIMPORT
-LONG
-PALAPI
-InterlockedOr(
-              IN OUT LONG volatile *Destination,
-              IN LONG Value);
-
-PALIMPORT
-UCHAR
-PALAPI
-InterlockedBitTestAndReset(
-               IN OUT LONG volatile *Base,
-               IN LONG Bit);
-
-PALIMPORT
-UCHAR
-PALAPI
-InterlockedBitTestAndSet(
-               IN OUT LONG volatile *Base,
-               IN LONG Bit);
-
-PALIMPORT
+inline
 unsigned char
 PALAPI
 BitScanForward64(
-             IN OUT PDWORD Index,
-             IN UINT64 qwMask);
+    IN OUT PDWORD Index,
+    IN UINT64 qwMask)
+{
+    unsigned char bRet = FALSE;
+    int iIndex = __builtin_ffsl(qwMask);
+    if (iIndex != 0)
+    {
+        // Set the Index after deducting unity
+        *Index = (DWORD)(iIndex - 1);
+        bRet = TRUE;
+    }
 
+    return bRet;
+}
+
+/*++
+Function:
+InterlockedIncrement
+
+The InterlockedIncrement function increments (increases by one) the
+value of the specified variable and checks the resulting value. The
+function prevents more than one thread from using the same variable
+simultaneously.
+
+Parameters
+
+lpAddend 
+[in/out] Pointer to the variable to increment. 
+
+Return Values
+
+The return value is the resulting incremented value. 
+
+--*/
+EXTERN_C
 PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedIncrement(
+    IN OUT LONG volatile *lpAddend)
+{
+    return __sync_add_and_fetch(lpAddend, (LONG)1);
+}
+
+EXTERN_C
+PALIMPORT
+inline
 LONGLONG
 PALAPI
 InterlockedIncrement64(
-             IN OUT LONGLONG volatile *lpAddend);
+    IN OUT LONGLONG volatile *lpAddend)
+{
+    return __sync_add_and_fetch(lpAddend, (LONGLONG)1);
+}
 
+/*++
+Function:
+InterlockedDecrement
+
+The InterlockedDecrement function decrements (decreases by one) the
+value of the specified variable and checks the resulting value. The
+function prevents more than one thread from using the same variable
+simultaneously.
+
+Parameters
+
+lpAddend 
+[in/out] Pointer to the variable to decrement. 
+
+Return Values
+
+The return value is the resulting decremented value.
+
+--*/
+EXTERN_C
 PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedDecrement(
+    IN OUT LONG volatile *lpAddend)
+{
+    return __sync_sub_and_fetch(lpAddend, (LONG)1);
+}
+
+EXTERN_C
+PALIMPORT
+inline
 LONGLONG
 PALAPI
 InterlockedDecrement64(
-             IN OUT LONGLONG volatile *lpAddend);
+    IN OUT LONGLONG volatile *lpAddend)
+{
+    return __sync_sub_and_fetch(lpAddend, (LONGLONG)1);
+}
 
+/*++
+Function:
+InterlockedExchange
+
+The InterlockedExchange function atomically exchanges a pair of
+values. The function prevents more than one thread from using the same
+variable simultaneously.
+
+Parameters
+
+Target 
+[in/out] Pointer to the value to exchange. The function sets
+this variable to Value, and returns its prior value.
+Value 
+[in] Specifies a new value for the variable pointed to by Target. 
+
+Return Values
+
+The function returns the initial value pointed to by Target. 
+
+--*/
+EXTERN_C
 PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedExchange(
+    IN OUT LONG volatile *Target,
+    IN LONG Value)
+{
+    return __sync_swap(Target, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
 LONGLONG
 PALAPI
 InterlockedExchange64(
-            IN OUT LONGLONG volatile *Target,
-            IN LONGLONG Value);
-            
-PALIMPORT
-LONGLONG
-PALAPI
-InterlockedExchangeAdd64(
-               IN OUT LONGLONG volatile *Addend,
-               IN LONGLONG Value);
+    IN OUT LONGLONG volatile *Target,
+    IN LONGLONG Value)
+{
+    return __sync_swap(Target, Value);
+}
 
+/*++
+Function:
+InterlockedCompareExchange
+
+The InterlockedCompareExchange function performs an atomic comparison
+of the specified values and exchanges the values, based on the outcome
+of the comparison. The function prevents more than one thread from
+using the same variable simultaneously.
+
+If you are exchanging pointer values, this function has been
+superseded by the InterlockedCompareExchangePointer function.
+
+Parameters
+
+Destination     [in/out] Specifies the address of the destination value. The sign is ignored.
+Exchange        [in]     Specifies the exchange value. The sign is ignored.
+Comperand       [in]     Specifies the value to compare to Destination. The sign is ignored.
+
+Return Values
+
+The return value is the initial value of the destination.
+
+--*/
+EXTERN_C
 PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedCompareExchange(
+    IN OUT LONG volatile *Destination,
+    IN LONG Exchange,
+    IN LONG Comperand)
+{
+    return __sync_val_compare_and_swap(
+        Destination, /* The pointer to a variable whose value is to be compared with. */
+        Comperand, /* The value to be compared */
+        Exchange /* The value to be stored */);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedCompareExchangeAcquire(
+    IN OUT LONG volatile *Destination,
+    IN LONG Exchange,
+    IN LONG Comperand)
+{
+    // TODO: implement the version with only the acquire semantics
+    return __sync_val_compare_and_swap(
+        Destination, /* The pointer to a variable whose value is to be compared with. */
+        Comperand, /* The value to be compared */
+        Exchange /* The value to be stored */);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedCompareExchangeRelease(
+    IN OUT LONG volatile *Destination,
+    IN LONG Exchange,
+    IN LONG Comperand)
+{
+    // TODO: implement the version with only the release semantics
+    return __sync_val_compare_and_swap(
+        Destination, /* The pointer to a variable whose value is to be compared with. */
+        Comperand, /* The value to be compared */
+        Exchange /* The value to be stored */);
+}
+
+// See the 32-bit variant in interlock2.s
+EXTERN_C
+PALIMPORT
+inline
 LONGLONG
 PALAPI
 InterlockedCompareExchange64(
-               IN OUT LONGLONG volatile *Destination,
-               IN LONGLONG Exchange,
-               IN LONGLONG Comperand);
+    IN OUT LONGLONG volatile *Destination,
+    IN LONGLONG Exchange,
+    IN LONGLONG Comperand)
+{
+    return __sync_val_compare_and_swap(
+        Destination, /* The pointer to a variable whose value is to be compared with. */
+        Comperand, /* The value to be compared */
+        Exchange /* The value to be stored */);
+}
+
+/*++
+Function:
+InterlockedExchangeAdd
+
+The InterlockedExchangeAdd function atomically adds the value of 'Value'
+to the variable that 'Addend' points to.
+
+Parameters
+
+lpAddend
+[in/out] Pointer to the variable to to added.
+
+Return Values
+
+The return value is the original value that 'Addend' pointed to.
+
+--*/
+EXTERN_C
+PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedExchangeAdd(
+    IN OUT LONG volatile *Addend,
+    IN LONG Value)
+{
+    return __sync_fetch_and_add(Addend, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONGLONG
+PALAPI
+InterlockedExchangeAdd64(
+    IN OUT LONGLONG volatile *Addend,
+    IN LONGLONG Value)
+{
+    return __sync_fetch_and_add(Addend, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedAnd(
+    IN OUT LONG volatile *Destination,
+    IN LONG Value)
+{
+    return __sync_fetch_and_and(Destination, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONG
+PALAPI
+InterlockedOr(
+    IN OUT LONG volatile *Destination,
+    IN LONG Value)
+{
+    return __sync_fetch_and_or(Destination, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+UCHAR
+PALAPI
+InterlockedBitTestAndReset(
+    IN OUT LONG volatile *Base,
+    IN LONG Bit)
+{
+    return (InterlockedAnd(Base, ~(1 << Bit)) & (1 << Bit)) != 0;
+}
+
+EXTERN_C
+PALIMPORT
+inline
+UCHAR
+PALAPI
+InterlockedBitTestAndSet(
+    IN OUT LONG volatile *Base,
+    IN LONG Bit)
+{
+    return (InterlockedOr(Base, (1 << Bit)) & (1 << Bit)) != 0;
+}
 
 #if defined(BIT64)
 #define InterlockedExchangePointer(Target, Value) \
@@ -5333,11 +5580,23 @@ InterlockedCompareExchange64(
     ((PVOID)(UINT_PTR)InterlockedCompareExchange((PLONG)(UINT_PTR)(Destination), (LONG)(UINT_PTR)(ExChange), (LONG)(UINT_PTR)(Comperand)))
 #endif
 
+/*++
+Function:
+MemoryBarrier
+
+The MemoryBarrier function creates a full memory barrier.
+
+--*/
+EXTERN_C
 PALIMPORT
+inline
 VOID
 PALAPI
 MemoryBarrier(
-    VOID);
+    VOID)
+{
+    __sync_synchronize();
+}
 
 PALIMPORT
 VOID
@@ -5437,13 +5696,20 @@ PALAPI
 FlushProcessWriteBuffers();
 
 typedef void (*PAL_ActivationFunction)(CONTEXT *context);
+typedef BOOL (*PAL_SafeActivationCheckFunction)(SIZE_T ip);
+
+PALIMPORT
+VOID
+PALAPI
+PAL_SetActivationFunction(
+    IN PAL_ActivationFunction pActivationFunction,
+    IN PAL_SafeActivationCheckFunction pSafeActivationCheckFunction);
 
 PALIMPORT
 BOOL
 PALAPI
 PAL_InjectActivation(
-    IN HANDLE hThread,
-    IN PAL_ActivationFunction pActivationFunction
+    IN HANDLE hThread
 );
 
 #define VER_PLATFORM_WIN32_WINDOWS        1
@@ -5653,6 +5919,10 @@ ReportEventW (
 #define ReportEvent  ReportEventA
 #endif // !UNICODE
 
+PALIMPORT
+HRESULT
+PALAPI
+CoCreateGuid(OUT GUID * pguid);
 
 /******************* C Runtime Entrypoints *******************************/
 
@@ -5895,13 +6165,47 @@ inline WCHAR *PAL_wcsstr(WCHAR *_S, const WCHAR *_P)
 }
 #endif
 
-PALIMPORT unsigned int __cdecl _rotl(unsigned int, int);
+/*++
+Function:
+_rotl
+
+See MSDN doc.
+--*/
+EXTERN_C
+PALIMPORT
+inline
+unsigned int __cdecl _rotl(unsigned int value, int shift)
+{
+    unsigned int retval = 0;
+
+    shift &= 0x1f;
+    retval = (value << shift) | (value >> (sizeof(int) * CHAR_BIT - shift));
+    return retval;
+}
+
 // On 64 bit unix, make the long an int.
 #ifdef BIT64
 #define _lrotl _rotl
 #endif // BIT64
 
-PALIMPORT unsigned int __cdecl _rotr(unsigned int, int);
+/*++
+Function:
+_rotr
+
+See MSDN doc.
+--*/
+EXTERN_C
+PALIMPORT
+inline
+unsigned int __cdecl _rotr(unsigned int value, int shift)
+{
+    unsigned int retval;
+
+    shift &= 0x1f;
+    retval = (value >> shift) | (value << (sizeof(int) * CHAR_BIT - shift));
+    return retval;
+}
+
 PALIMPORT int __cdecl abs(int);
 PALIMPORT double __cdecl fabs(double); 
 #ifndef PAL_STDCPP_COMPAT
@@ -6346,8 +6650,14 @@ public:
 
 #include "pal_unwind.h"
 
+#define EXCEPTION_CONTINUE_SEARCH   0
+#define EXCEPTION_EXECUTE_HANDLER   1
+#define EXCEPTION_CONTINUE_EXECUTION -1
+
 struct PAL_SEHException
 {
+private:
+    const SIZE_T NoTargetFrameSp = SIZE_MAX;
 public:
     // Note that the following two are actually embedded in this heap-allocated
     // instance - in contrast to Win32, where the exception record would usually
@@ -6356,6 +6666,8 @@ public:
     EXCEPTION_POINTERS ExceptionPointers;
     EXCEPTION_RECORD ExceptionRecord;
     CONTEXT ContextRecord;
+    // Target frame stack pointer set before the 2nd pass.
+    SIZE_T TargetFrameSp;
 
     PAL_SEHException(EXCEPTION_RECORD *pExceptionRecord, CONTEXT *pContextRecord)
     {
@@ -6363,7 +6675,33 @@ public:
         ExceptionPointers.ContextRecord = &ContextRecord;
         ExceptionRecord = *pExceptionRecord;
         ContextRecord = *pContextRecord;
+        TargetFrameSp = NoTargetFrameSp;
     }
+
+    PAL_SEHException()
+    {
+    }    
+
+    PAL_SEHException(const PAL_SEHException& ex)
+    {
+        *this = ex;
+    }    
+
+    bool IsFirstPass()
+    {
+        return (TargetFrameSp == NoTargetFrameSp);
+    }
+
+    PAL_SEHException& operator=(const PAL_SEHException& ex)
+    {
+        ExceptionPointers.ExceptionRecord = &ExceptionRecord;
+        ExceptionPointers.ContextRecord = &ContextRecord;
+        ExceptionRecord = ex.ExceptionRecord;
+        ContextRecord = ex.ContextRecord;
+        TargetFrameSp = ex.TargetFrameSp;
+
+        return *this;
+    }    
 };
 
 typedef VOID (PALAPI *PHARDWARE_EXCEPTION_HANDLER)(PAL_SEHException* ex);
@@ -6374,31 +6712,111 @@ PALAPI
 PAL_SetHardwareExceptionHandler(
     IN PHARDWARE_EXCEPTION_HANDLER exceptionHandler);
 
-class PAL_CatchHardwareExceptionHolder
+//
+// This holder is used to indicate that a hardware
+// exception should be raised as a C++ exception
+// to better emulate SEH on the xplat platforms.
+//
+class CatchHardwareExceptionHolder
 {
 public:
-    PAL_CatchHardwareExceptionHolder();
+    CatchHardwareExceptionHolder();
 
-    ~PAL_CatchHardwareExceptionHolder();
+    ~CatchHardwareExceptionHolder();
 
     static bool IsEnabled();
 };
 
 #ifdef FEATURE_ENABLE_HARDWARE_EXCEPTIONS
-#define HardwareExceptionHolder PAL_CatchHardwareExceptionHolder __catchHardwareException;
+#define HardwareExceptionHolder CatchHardwareExceptionHolder __catchHardwareException;
 #else
 #define HardwareExceptionHolder
 #endif // FEATURE_ENABLE_HARDWARE_EXCEPTIONS
 
 #ifdef FEATURE_PAL_SXS
 
+extern "C++" {
+
+//
+// This is the base class of native exception holder used to provide 
+// the filter function to the exception dispatcher. This allows the
+// filter to be called during the first pass to better emulate SEH
+// the xplat platforms that only have C++ exception support.
+//
+class NativeExceptionHolderBase : CatchHardwareExceptionHolder
+{
+    // Save the address of the holder head so the destructor 
+    // doesn't have access the slow (on Linux) TLS value again.
+    NativeExceptionHolderBase **m_head;
+
+    // The next holder on the stack
+    NativeExceptionHolderBase *m_next;
+
+protected:
+    NativeExceptionHolderBase();
+
+    ~NativeExceptionHolderBase();
+
+public:
+    // Calls the holder's filter handler.
+    virtual EXCEPTION_DISPOSITION InvokeFilter(PAL_SEHException& ex) = 0;
+
+    // Adds the holder to the "stack" of holders. This is done explicitly instead
+    // of in the constructor was to avoid the mess of move constructors combined
+    // with return value optimization (in CreateHolder).
+    void Push();
+
+    // Given the locals stack range find the next holder starting with this one
+    NativeExceptionHolderBase *FindNextHolder(void *frameLowAddress, void *frameHighAddress);
+
+    // Given the locals stack range find the holder
+    static NativeExceptionHolderBase *FindHolder(void *frameLowAddress, void *frameHighAddress);
+};
+
+//
+// This is the second part of the native exception filter holder. It is
+// templated because the lambda used to wrap the exception filter is a
+// unknown type. 
+//
+template<class FilterType>
+class NativeExceptionHolder : public NativeExceptionHolderBase
+{
+    FilterType* m_exceptionFilter;
+
+public:
+    NativeExceptionHolder(FilterType* exceptionFilter)
+        : NativeExceptionHolderBase()
+    {
+        m_exceptionFilter = exceptionFilter;
+    }
+
+    virtual EXCEPTION_DISPOSITION InvokeFilter(PAL_SEHException& ex)
+    {
+        return (*m_exceptionFilter)(ex);
+    }
+};
+
+//
+// This factory class for the native exception holder is necessary because
+// templated functions don't need the explicit type parameter and can infer
+// the template type from the parameter.
+//
+class NativeExceptionHolderFactory
+{
+public:
+    template<class FilterType>
+    static NativeExceptionHolder<FilterType> CreateHolder(FilterType* exceptionFilter)
+    {
+        return NativeExceptionHolder<FilterType>(exceptionFilter);
+    }
+};
+
 // Start of a try block for exceptions raised by RaiseException
 #define PAL_TRY(__ParamType, __paramDef, __paramRef)                            \
 {                                                                               \
     __ParamType __param = __paramRef;                                           \
     auto tryBlock = [](__ParamType __paramDef)                                  \
-    {                                                                           \
-        HardwareExceptionHolder
+    {
 
 // Start of an exception handler. If an exception raised by the RaiseException 
 // occurs in the try block and the disposition is EXCEPTION_EXECUTE_HANDLER, 
@@ -6409,14 +6827,25 @@ public:
     };                                                                          \
     const bool isFinally = false;                                               \
     auto finallyBlock = []() {};                                                \
+    EXCEPTION_DISPOSITION disposition = EXCEPTION_CONTINUE_EXECUTION;           \
+    auto exceptionFilter = [&disposition, &__param](PAL_SEHException& ex)       \
+    {                                                                           \
+        disposition = dispositionExpression;                                    \
+        _ASSERTE(disposition != EXCEPTION_CONTINUE_EXECUTION);                  \
+        return disposition;                                                     \
+    };                                                                          \
     try                                                                         \
     {                                                                           \
+        auto __exceptionHolder = NativeExceptionHolderFactory::CreateHolder(&exceptionFilter); \
+        __exceptionHolder.Push();                                               \
         tryBlock(__param);                                                      \
     }                                                                           \
     catch (PAL_SEHException& ex)                                                \
     {                                                                           \
-        EXCEPTION_DISPOSITION disposition = dispositionExpression;              \
-        _ASSERTE(disposition != EXCEPTION_CONTINUE_EXECUTION);                  \
+        if (disposition == EXCEPTION_CONTINUE_EXECUTION)                        \
+        {                                                                       \
+            exceptionFilter(ex);                                                \
+        }                                                                       \
         if (disposition == EXCEPTION_CONTINUE_SEARCH)                           \
         {                                                                       \
             throw;                                                              \
@@ -6451,6 +6880,8 @@ public:
         finallyBlock();                 \
     }                                   \
 }
+
+} // extern "C++"
 
 #endif // FEATURE_PAL_SXS
 
@@ -6495,10 +6926,6 @@ public:
 
 #endif // __cplusplus
 
-#define EXCEPTION_CONTINUE_SEARCH   0
-#define EXCEPTION_EXECUTE_HANDLER   1
-#define EXCEPTION_CONTINUE_EXECUTION -1
-
 // Platform-specific library naming
 // 
 #ifdef PLATFORM_UNIX
@@ -6524,6 +6951,18 @@ public:
 #define MAKEDLLNAME(x) MAKEDLLNAME_W(x)
 #else
 #define MAKEDLLNAME(x) MAKEDLLNAME_A(x)
+#endif
+
+#define PAL_SHLIB_PREFIX "lib"
+
+#if __APPLE__
+#define PAL_SHLIB_SUFFIX ".dylib"
+#elif _AIX
+#define PAL_SHLIB_SUFFIX ".a"
+#elif _HPUX_
+#define PAL_SHLIB_SUFFIX ".sl"
+#else
+#define PAL_SHLIB_SUFFIX ".so"
 #endif
 
 #define DBG_EXCEPTION_HANDLED            ((DWORD   )0x00010001L)    

@@ -72,48 +72,6 @@ namespace CorUnix
 
 /*++
 Function:
-  _rotl
-
-See MSDN doc.
---*/
-unsigned int
-__cdecl 
-_rotl( unsigned int value, int shift )
-{
-    unsigned int retval = 0;
-
-    PERF_ENTRY(_rotl);
-    ENTRY("_rotl( value:%u shift=%d )\n", value, shift );   
-    shift &= 0x1f;
-    retval = ( value << shift ) | ( value >> ( sizeof( int ) * CHAR_BIT - shift ));
-    LOGEXIT("_rotl returns unsigned int %u\n", retval);
-    PERF_EXIT(_rotl);
-    return retval;
-}
-
-/*++
-Function:
-  _rotr
-
-See MSDN doc.
---*/
-unsigned int
-__cdecl 
-_rotr( unsigned int value, int shift )
-{
-    unsigned int retval;
-
-    PERF_ENTRY(_rotr);
-    ENTRY("_rotr( value:%u shift=%d )\n", value, shift );    
-    shift &= 0x1f;
-    retval = ( value >> shift ) | ( value << ( sizeof( int ) * CHAR_BIT - shift ) );
-    LOGEXIT("_rotr returns unsigned int %u\n", retval);
-    PERF_EXIT(_rotr);
-    return retval;
-}
-
-/*++
-Function:
   _gcvt_s
 
 See MSDN doc.
@@ -334,19 +292,19 @@ PAL_qsort(void *base, size_t nmemb, size_t size,
 
 /* reset ENTRY nesting level back to zero, qsort will invoke app-defined 
    callbacks and we want their entry traces... */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
 {
     int old_level;
     old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
     qsort(base,nmemb,size,compar);
 
 /* ...and set nesting level back to what it was */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
     DBG_change_entrylevel(old_level);
 }
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
     LOGEXIT("qsort returns\n");
     PERF_EXIT(qsort);
@@ -365,19 +323,19 @@ PAL_bsearch(const void *key, const void *base, size_t nmemb, size_t size,
 
 /* reset ENTRY nesting level back to zero, bsearch will invoke app-defined 
    callbacks and we want their entry traces... */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
 {
     int old_level;
     old_level = DBG_change_entrylevel(0);
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
     retval = bsearch(key,base,nmemb,size,compar);
 
 /* ...and set nesting level back to what it was */
-#if !_NO_DEBUG_MESSAGES_
+#if _ENABLE_DEBUG_MESSAGES_
     DBG_change_entrylevel(old_level);
 }
-#endif /* !_NO_DEBUG_MESSAGES_ */
+#endif /* _ENABLE_DEBUG_MESSAGES_ */
 
     LOGEXIT("bsearch returns %p\n",retval);
     PERF_EXIT(bsearch);

@@ -159,27 +159,27 @@ namespace System {
             Contract.Ensures(Contract.Result<String>() != null);
             Contract.EndContractBlock();
 
-            if (separator == null)
-                separator = String.Empty;
-
-
             using(IEnumerator<String> en = values.GetEnumerator()) {
                 if (!en.MoveNext())
                     return String.Empty;
 
-                StringBuilder result = StringBuilderCache.Acquire();
-                if (en.Current != null) {
-                    result.Append(en.Current);
+                String firstValue = en.Current;
+
+                if (!en.MoveNext()) {
+                    // Only one value available
+                    return firstValue ?? String.Empty;
                 }
 
-                while (en.MoveNext()) {
+                // Null separator and values are handled by the StringBuilder
+                StringBuilder result = StringBuilderCache.Acquire();
+                result.Append(firstValue);
+
+                do {
                     result.Append(separator);
-                    if (en.Current != null) {
-                        result.Append(en.Current);
-                    }
-                }            
+                    result.Append(en.Current);
+                } while (en.MoveNext());
                 return StringBuilderCache.GetStringAndRelease(result);
-            }           
+            }
         }
 
 
@@ -219,13 +219,19 @@ namespace System {
             if (count == 0) {
                 return String.Empty;
             }
-            
+
+            if (count == 1) {
+                return value[startIndex] ?? String.Empty;
+            }
+
             int jointLength = 0;
             //Figure out the total length of the strings in value
             int endIndex = startIndex + count - 1;
             for (int stringToJoinIndex = startIndex; stringToJoinIndex <= endIndex; stringToJoinIndex++) {
-                if (value[stringToJoinIndex] != null) {
-                    jointLength += value[stringToJoinIndex].Length;
+                string currentValue = value[stringToJoinIndex];
+
+                if (currentValue != null) {
+                    jointLength += currentValue.Length;
                 }
             }
             
@@ -2550,10 +2556,12 @@ namespace System {
                     return CultureInfo.InvariantCulture.CompareInfo.IsPrefix(this, value, CompareOptions.IgnoreCase);                    
 
                 case StringComparison.Ordinal:
-                    if( this.Length < value.Length) {
+                    if( this.Length < value.Length || m_firstChar != value.m_firstChar) {
                         return false;
                     }
-                    return (nativeCompareOrdinalEx(this, 0, value, 0, value.Length) == 0);
+                    return (value.Length == 1) ?
+                            true :                 // First char is the same and thats all there is to compare
+                            (nativeCompareOrdinalEx(this, 0, value, 0, value.Length) == 0);
 
                 case StringComparison.OrdinalIgnoreCase:
                     if( this.Length < value.Length) {

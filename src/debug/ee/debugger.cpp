@@ -2054,6 +2054,9 @@ HRESULT Debugger::Startup(void)
     }
 #endif
 
+#ifdef FEATURE_PAL
+    PAL_InitializeDebug();
+#endif // FEATURE_PAL
 
     // Lazily initialize the interop-safe heap
 
@@ -6708,7 +6711,7 @@ DebuggerLaunchSetting Debugger::GetDbgJITDebugLaunchSetting()
 
     DebuggerLaunchSetting setting = DLS_ASK_USER;
 
-    DWORD cchDbgFormat = MAX_PATH;
+    DWORD cchDbgFormat = MAX_LONGPATH;
     INDEBUG(DWORD cchOldDbgFormat = cchDbgFormat);
 
 #if defined(DACCESS_COMPILE)
@@ -7714,7 +7717,7 @@ HRESULT Debugger::SendException(Thread *pThread,
     if (fAttaching)
     {
         JitAttach(pThread, pExceptionInfo, managedEventNeeded, FALSE);
-        // If the jit-attach occured, CORDebuggerAttached() may now be true and we can 
+        // If the jit-attach occurred, CORDebuggerAttached() may now be true and we can 
         // just act as if a debugger was always attached.
     }
 
@@ -13482,7 +13485,7 @@ void STDCALL ExceptionHijackWorker(
     // call SetThreadContext on ourself to fix us.
 }
 
-#if defined(WIN64EXCEPTIONS)
+#if defined(WIN64EXCEPTIONS) && !defined(FEATURE_PAL)
 
 #if defined(_TARGET_AMD64_)
 // ----------------------------------------------------------------------------
@@ -13571,7 +13574,7 @@ ExceptionHijackPersonalityRoutine(IN     PEXCEPTION_RECORD   pExceptionRecord
     // exactly the behavior we want.
     return ExceptionCollidedUnwind;
 }
-#endif // WIN64EXCEPTIONS
+#endif // WIN64EXCEPTIONS && !FEATURE_PAL
 
 
 // UEF Prototype from excep.cpp
@@ -15136,7 +15139,8 @@ HRESULT Debugger::InitAppDomainIPC(void)
     } hEnsureCleanup(this);
 
     DWORD dwStrLen = 0;
-    WCHAR szExeName[MAX_LONGPATH];
+    SString szExeNamePathString;
+    WCHAR * szExeName = szExeNamePathString.OpenUnicodeBuffer(MAX_LONGPATH);
     int i;
 
     // all fields in the object can be zero initialized.
@@ -15188,6 +15192,7 @@ HRESULT Debugger::InitAppDomainIPC(void)
                                     szExeName,
                                     MAX_LONGPATH);
 
+    szExeNamePathString.CloseBuffer(dwStrLen);
     // If we couldn't get the name, then use a nice default.
     if (dwStrLen == 0)
     {
@@ -15406,7 +15411,11 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
 #if defined(_TARGET_X86_)
         filterContext->Eax = (DWORD)pDE;
 #elif defined(_TARGET_AMD64_)
+#ifdef UNIX_AMD64_ABI
+        filterContext->Rdi = (SIZE_T)pDE;
+#else // UNIX_AMD64_ABI
         filterContext->Rcx = (SIZE_T)pDE;
+#endif // !UNIX_AMD64_ABI
 #elif defined(_TARGET_ARM_)
         filterContext->R0 = (DWORD)pDE;
 #else

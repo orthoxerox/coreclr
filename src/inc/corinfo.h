@@ -189,8 +189,11 @@ TODO: Talk about initializing strutures before use
 #include <corhdr.h>
 #include <specstrings.h>
 
-#define SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS   2
-#define SYSTEMV_MAX_STRUCT_BYTES_TO_PASS_IN_REGISTERS       16
+// For System V on the CLR type system number of registers to pass in and return a struct is the same.
+// The CLR type system allows only up to 2 eightbytes to be passed in registers. There is no SSEUP classification types.
+#define CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS   2 
+#define CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_RETURN_IN_REGISTERS 2
+#define CLR_SYSTEMV_MAX_STRUCT_BYTES_TO_PASS_IN_REGISTERS       16
 
 // System V struct passing
 // The Classification types are described in the ABI spec at http://www.x86-64.org/documentation/abi.pdf
@@ -210,7 +213,7 @@ enum SystemVClassificationType : unsigned __int8
     SystemVClassificationTypeMAX = 7,
 };
 
-
+// Represents classification information for a struct.
 struct SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR
 {
     SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR()
@@ -218,19 +221,40 @@ struct SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR
         Initialize();
     }
 
-    bool                        canPassInRegisters;
-    unsigned int                numberEightBytes;
-    SystemVClassificationType   eightByteClassifications[SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS];
-    unsigned int                eightByteSizes[SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS];
-    unsigned int                eightByteOffsets[SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS];
+    bool                        passedInRegisters; // Whether the struct is passable/passed (this includes struct returning) in registers.
+    unsigned __int8             eightByteCount;    // Number of eightbytes for this struct.
+    SystemVClassificationType   eightByteClassifications[CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS]; // The eightbytes type classification.
+    unsigned __int8             eightByteSizes[CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS];           // The size of the eightbytes (an eightbyte could include padding. This represents the no padding size of the eightbyte).
+    unsigned __int8             eightByteOffsets[CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS];         // The start offset of the eightbytes (in bytes).
+
+
+    //------------------------------------------------------------------------
+    // CopyFrom: Copies a struct classification into this one.
+    //
+    // Arguments:
+    //    'copyFrom' the struct classification to copy from.
+    //
+    void CopyFrom(const SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR& copyFrom)
+    {
+        passedInRegisters = copyFrom.passedInRegisters;
+        eightByteCount = copyFrom.eightByteCount;
+
+        for (int i = 0; i < CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS; i++)
+        {
+            eightByteClassifications[i] = copyFrom.eightByteClassifications[i];
+            eightByteSizes[i] = copyFrom.eightByteSizes[i];
+            eightByteOffsets[i] = copyFrom.eightByteOffsets[i];
+        }
+    }
 
     // Members
+private:
     void Initialize()
     {
-        canPassInRegisters = false;
-        numberEightBytes = false;
+        passedInRegisters = false;
+        eightByteCount = 0;
 
-        for (int i = 0; i < SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS; i++)
+        for (int i = 0; i < CLR_SYSTEMV_MAX_EIGHTBYTES_COUNT_TO_PASS_IN_REGISTERS; i++)
         {
             eightByteClassifications[i] = SystemVClassificationTypeUnknown;
             eightByteSizes[i] = 0;
@@ -2027,7 +2051,12 @@ enum { LCL_FINALLY_MARK = 0xFC }; // FC = "Finally Call"
 #define CORINFO_PAGE_SIZE   0x1000                           // the page size on the machine
 
 // <TODO>@TODO: put this in the CORINFO_EE_INFO data structure</TODO>
+
+#ifndef FEATURE_PAL
 #define MAX_UNCHECKED_OFFSET_FOR_NULL_OBJECT ((32*1024)-1)   // when generating JIT code
+#else // !FEATURE_PAL
+#define MAX_UNCHECKED_OFFSET_FOR_NULL_OBJECT ((OS_PAGE_SIZE / 2) - 1)
+#endif // !FEATURE_PAL
 
 typedef void* CORINFO_MethodPtr;            // a generic method pointer
 
@@ -3414,7 +3443,7 @@ public:
     // to return the string values to the runtime for deletion.
     // this avoid leaking the memory in the JIT.
     virtual void freeStringConfigValue(
-        wchar_t *value
+        __in_z wchar_t *value
         ) = 0;
 #endif // !RYUJIT_CTPBUILD
 };

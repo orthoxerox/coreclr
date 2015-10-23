@@ -46,7 +46,6 @@ Revision History:
 #define E_UNEXPECTED                     _HRESULT_TYPEDEF_(0x8000FFFFL)
 #define E_OUTOFMEMORY                    _HRESULT_TYPEDEF_(0x8007000EL)
 #define E_INVALIDARG                     _HRESULT_TYPEDEF_(0x80070057L)
-#define E_INVALIDARG                     _HRESULT_TYPEDEF_(0x80070057L)
 #define E_POINTER                        _HRESULT_TYPEDEF_(0x80004003L)
 #define E_HANDLE                         _HRESULT_TYPEDEF_(0x80070006L)
 #define E_ABORT                          _HRESULT_TYPEDEF_(0x80004004L)
@@ -749,8 +748,6 @@ STDAPI CreateStreamOnHGlobal(PVOID hGlobal, BOOL fDeleteOnRelease, interface ISt
 STDAPI IIDFromString(LPOLESTR lpsz, IID* lpiid);
 STDAPI_(int) StringFromGUID2(REFGUID rguid, LPOLESTR lpsz, int cchMax); 
 
-STDAPI CoCreateGuid(OUT GUID * pguid);
-
 /******************* CRYPT **************************************/
 
 #define PUBLICKEYBLOB           0x6
@@ -1365,11 +1362,15 @@ typedef VOID (__stdcall *WAITORTIMERCALLBACK)(PVOID, BOOLEAN);
 #define DIRECTORY_SEPARATOR_CHAR_W W('/')
 #define DIRECTORY_SEPARATOR_STR_W W("/")
 #define PATH_SEPARATOR_CHAR_W W(':')
+#define PATH_SEPARATOR_STR_W W(":")
+#define VOLUME_SEPARATOR_CHAR_W W('/')
 #else // PLATFORM_UNIX
 #define DIRECTORY_SEPARATOR_CHAR_A '\\'
 #define DIRECTORY_SEPARATOR_CHAR_W W('\\')
 #define DIRECTORY_SEPARATOR_STR_W W("\\")
 #define PATH_SEPARATOR_CHAR_W W(';')
+#define PATH_SEPARATOR_STR_W W(";")
+#define VOLUME_SEPARATOR_CHAR_W W(':')
 #endif // PLATFORM_UNIX
 
 #ifndef IMAGE_IMPORT_DESC_FIELD
@@ -1709,8 +1710,6 @@ typedef LONG (WINAPI *PTOP_LEVEL_EXCEPTION_FILTER)(
     IN struct _EXCEPTION_POINTERS *ExceptionInfo
     );
 typedef PTOP_LEVEL_EXCEPTION_FILTER LPTOP_LEVEL_EXCEPTION_FILTER;
-
-BOOL PAL_VirtualUnwind(CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *contextPointers);
 
 /******************* ntdef ************************************/
 

@@ -573,6 +573,14 @@ void SafeExitProcess(UINT exitCode, BOOL fAbort = FALSE, ShutdownCompleteAction 
         // disabled because if we fault in this code path we will trigger our
         // Watson code via EntryPointFilter which is THROWS (see Dev11 317016)
         CONTRACT_VIOLATION(ThrowsViolation);
+
+#ifdef FEATURE_PAL
+        if (fAbort)
+        {
+            TerminateProcess(GetCurrentProcess(), exitCode);
+        }
+#endif
+
         EEPolicy::ExitProcessViaShim(exitCode);
     }
 }
@@ -1437,10 +1445,10 @@ void DECLSPEC_NORETURN EEPolicy::HandleFatalStackOverflow(EXCEPTION_POINTERS *pE
             param.pExceptionRecord = pExceptionInfo->ExceptionRecord;
             g_pDebugInterface->RequestFavor(ResetWatsonBucketsFavorWorker, reinterpret_cast<void *>(&param));
         }
+#endif // !FEATURE_PAL        
 
         WatsonLastChance(pThread, pExceptionInfo, 
             (fTreatAsNativeUnhandledException == FALSE)? TypeOfReportedError::UnhandledException: TypeOfReportedError::NativeThreadUnhandledException);
-#endif // !FEATURE_PAL        
     }
 
     TerminateProcess(GetCurrentProcess(), COR_E_STACKOVERFLOW);

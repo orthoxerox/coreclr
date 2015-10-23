@@ -1442,12 +1442,12 @@ void WaitLongerNoInstru (int i)
 {
     // every 8th attempt:
     Thread *pCurThread = GetThread();
-    BOOL bToggleGC = FALSE;
+    bool bToggleGC = false;
     if (pCurThread)
     {
-        bToggleGC = pCurThread->PreemptiveGCDisabled();
+        bToggleGC = GCToEEInterface::IsPreemptiveGCDisabled(pCurThread);
         if (bToggleGC)
-            pCurThread->EnablePreemptiveGC();
+            GCToEEInterface::EnablePreemptiveGC(pCurThread);
     }
 
     // if we're waiting for gc to finish, we should block immediately
@@ -1473,10 +1473,10 @@ void WaitLongerNoInstru (int i)
     {
         if (bToggleGC || g_TrapReturningThreads)
         {
-            pCurThread->DisablePreemptiveGC();
+            GCToEEInterface::DisablePreemptiveGC(pCurThread);
             if (!bToggleGC)
             {
-                pCurThread->EnablePreemptiveGC();
+                GCToEEInterface::EnablePreemptiveGC(pCurThread);
             }
         }
     }
@@ -1609,13 +1609,13 @@ void WaitLonger (int i
 
     // every 8th attempt:
     Thread *pCurThread = GetThread();
-    BOOL bToggleGC = FALSE;
+    bool bToggleGC = false;
     if (pCurThread)
     {
-        bToggleGC = pCurThread->PreemptiveGCDisabled();
+        bToggleGC = GCToEEInterface::IsPreemptiveGCDisabled(pCurThread);
         if (bToggleGC)
         {
-            pCurThread->EnablePreemptiveGC();
+            GCToEEInterface::EnablePreemptiveGC(pCurThread);
         }
         else
         {
@@ -1657,7 +1657,7 @@ void WaitLonger (int i
 #ifdef SYNCHRONIZATION_STATS
             (spin_lock->num_disable_preemptive_w)++;
 #endif //SYNCHRONIZATION_STATS
-            pCurThread->DisablePreemptiveGC();
+            GCToEEInterface::DisablePreemptiveGC(pCurThread);
         }
     }
 }
@@ -1735,13 +1735,13 @@ static void leave_spin_lock (GCSpinLock * spin_lock)
 
 BOOL gc_heap::enable_preemptive (Thread* current_thread)
 {
-    BOOL cooperative_mode = FALSE;
+    bool cooperative_mode = false;
     if (current_thread)
     {
-        cooperative_mode = current_thread->PreemptiveGCDisabled();
+        cooperative_mode = GCToEEInterface::IsPreemptiveGCDisabled(current_thread);
         if (cooperative_mode)
         {
-            current_thread->EnablePreemptiveGC();    
+            GCToEEInterface::EnablePreemptiveGC(current_thread);
         }
     }
 
@@ -1754,7 +1754,7 @@ void gc_heap::disable_preemptive (Thread* current_thread, BOOL restore_cooperati
     {
         if (restore_cooperative)
         {
-            current_thread->DisablePreemptiveGC(); 
+            GCToEEInterface::DisablePreemptiveGC(current_thread);
         }
     }
 }
@@ -2305,7 +2305,7 @@ size_t      gc_heap::fgn_last_alloc = 0;
 
 int         gc_heap::generation_skip_ratio = 100;
 
-unsigned __int64 gc_heap::loh_alloc_since_cg = 0;
+UINT64      gc_heap::loh_alloc_since_cg = 0;
 
 BOOL        gc_heap::elevation_requested = FALSE;
 
@@ -4664,7 +4664,7 @@ BOOL gc_heap::unprotect_segment (heap_segment* seg)
 #endif //_MSC_VER
 #elif defined(_TARGET_AMD64_) 
 #ifdef _MSC_VER
-extern "C" unsigned __int64 __rdtsc();
+extern "C" UINT64 __rdtsc();
 #pragma intrinsic(__rdtsc)
     static SSIZE_T get_cycle_count()
     {
@@ -7247,11 +7247,11 @@ void gc_heap::copy_brick_card_table(BOOL heap_expand)
     }
     //check if we need to turn on card_bundles.
 #ifdef MULTIPLE_HEAPS
-    // use __int64 arithmetic here because of possible overflow on 32p
-    unsigned __int64 th = (unsigned __int64)MH_TH_CARD_BUNDLE*gc_heap::n_heaps;
+    // use INT64 arithmetic here because of possible overflow on 32p
+    UINT64 th = (UINT64)MH_TH_CARD_BUNDLE*gc_heap::n_heaps;
 #else
-    // use __int64 arithmetic here because of possible overflow on 32p
-    unsigned __int64 th = (unsigned __int64)SH_TH_CARD_BUNDLE;
+    // use INT64 arithmetic here because of possible overflow on 32p
+    UINT64 th = (UINT64)SH_TH_CARD_BUNDLE;
 #endif //MULTIPLE_HEAPS
     if (reserved_memory >= th)
     {
@@ -9409,7 +9409,7 @@ HRESULT gc_heap::initialize_gc (size_t segment_size,
             FILE_ATTRIBUTE_NORMAL,
             NULL);
 #else // FEATURE_REDHAWK
-        char logfile_name[MAX_PATH+1];
+        char logfile_name[MAX_LONGPATH+1];
         if (temp_logfile_name != 0)
         {
             int ret;
@@ -9441,7 +9441,7 @@ HRESULT gc_heap::initialize_gc (size_t segment_size,
         // GCLogFileSize in MBs.
         gc_log_file_size = CLRConfig::GetConfigValue(CLRConfig::UNSUPPORTED_GCLogFileSize);
 
-        if (gc_log_file_size < 0 || gc_log_file_size > 500)
+        if (gc_log_file_size > 500)
         {
             CloseHandle (gc_log);
             return E_FAIL;
@@ -9503,11 +9503,11 @@ HRESULT gc_heap::initialize_gc (size_t segment_size,
 #ifdef CARD_BUNDLE
     //check if we need to turn on card_bundles.
 #ifdef MULTIPLE_HEAPS
-    // use __int64 arithmetic here because of possible overflow on 32p
-    unsigned __int64 th = (unsigned __int64)MH_TH_CARD_BUNDLE*number_of_heaps;
+    // use INT64 arithmetic here because of possible overflow on 32p
+    UINT64 th = (UINT64)MH_TH_CARD_BUNDLE*number_of_heaps;
 #else
-    // use __int64 arithmetic here because of possible overflow on 32p
-    unsigned __int64 th = (unsigned __int64)SH_TH_CARD_BUNDLE;
+    // use INT64 arithmetic here because of possible overflow on 32p
+    UINT64 th = (UINT64)SH_TH_CARD_BUNDLE;
 #endif //MULTIPLE_HEAPS
 
     if ((can_use_write_watch() && reserved_memory >= th))
@@ -12164,19 +12164,19 @@ BOOL gc_heap::retry_full_compact_gc (size_t size)
 {
     size_t seg_size = get_large_seg_size (size);
 
-    if (loh_alloc_since_cg >= (2 * (unsigned __int64)seg_size))
+    if (loh_alloc_since_cg >= (2 * (UINT64)seg_size))
     {
         return TRUE;
     }
 
 #ifdef MULTIPLE_HEAPS
-    unsigned __int64 total_alloc_size = 0;
+    UINT64 total_alloc_size = 0;
     for (int i = 0; i < n_heaps; i++)
     {
         total_alloc_size += g_heaps[i]->loh_alloc_since_cg;
     }
 
-    if (total_alloc_size >= (2 * (unsigned __int64)seg_size))
+    if (total_alloc_size >= (2 * (UINT64)seg_size))
     {
         return TRUE;
     }
@@ -18911,7 +18911,7 @@ void gc_heap::scan_dependent_handles (int condemned_gen_number, ScanContext *sc,
     }
 
     // Process any mark stack overflow that may have resulted from scanning handles (or if we didn't need to
-    // scan any handles at all this is the processing of overflows that may have occured prior to this method
+    // scan any handles at all this is the processing of overflows that may have occurred prior to this method
     // invocation).
     process_mark_overflow(condemned_gen_number);
 }
@@ -22544,7 +22544,7 @@ void gc_heap::make_free_lists (int condemned_gen_number)
 
 void gc_heap::make_free_list_in_brick (BYTE* tree, make_free_args* args)
 {
-    assert ((tree >= 0));
+    assert ((tree != NULL));
     {
         int  right_node = node_right_child (tree);
         int left_node = node_left_child (tree);
@@ -23282,7 +23282,7 @@ void gc_heap::relocate_survivors_in_plug (BYTE* plug, BYTE* plug_end,
 
 void gc_heap::relocate_survivors_in_brick (BYTE* tree, relocate_args* args)
 {
-    assert ((tree != 0));
+    assert ((tree != NULL));
 
     dprintf (3, ("tree: %Ix, args->last_plug: %Ix, left: %Ix, right: %Ix, gap(t): %Ix",
         tree, args->last_plug, 
@@ -23463,7 +23463,7 @@ void gc_heap::walk_plug (BYTE* plug, size_t size, BOOL check_last_object_p, walk
 
 void gc_heap::walk_relocation_in_brick (BYTE* tree, walk_relocate_args* args, size_t profiling_context)
 {
-    assert ((tree != 0));
+    assert ((tree != NULL));
     if (node_left_child (tree))
     {
         walk_relocation_in_brick (tree + node_left_child (tree), args, profiling_context);
@@ -24041,7 +24041,7 @@ void gc_heap::compact_plug (BYTE* plug, size_t size, BOOL check_last_object_p, c
 
 void gc_heap::compact_in_brick (BYTE* tree, compact_args* args)
 {
-    assert (tree >= 0);
+    assert (tree != NULL);
     int   left_node = node_left_child (tree);
     int   right_node = node_right_child (tree);
     ptrdiff_t relocation = node_relocation_distance (tree);
@@ -24371,7 +24371,7 @@ DWORD __stdcall gc_heap::bgc_thread_stub (void* arg)
     // since now GC threads can be managed threads.
     ClrFlsSetThreadType (ThreadType_GC);
     assert (heap->bgc_thread != NULL);
-    heap->bgc_thread->SetGCSpecial(true);
+    GCToEEInterface::SetGCSpecial(heap->bgc_thread);
     STRESS_LOG_RESERVE_MEM (GC_STRESSLOG_MULTIPLY);
 
     // We commit the thread's entire stack to ensure we're robust in low memory conditions.
@@ -24607,10 +24607,10 @@ void gc_heap::allow_fgc()
 {
     assert (bgc_thread == GetThread());
 
-    if (bgc_thread->PreemptiveGCDisabled() && bgc_thread->CatchAtSafePoint())
+    if (GCToEEInterface::IsPreemptiveGCDisabled(bgc_thread) && GCToEEInterface::CatchAtSafePoint(bgc_thread))
     {
-        bgc_thread->EnablePreemptiveGC();
-        bgc_thread->DisablePreemptiveGC();
+        GCToEEInterface::EnablePreemptiveGC(bgc_thread);
+        GCToEEInterface::DisablePreemptiveGC(bgc_thread);
     }
 }
 
@@ -27497,7 +27497,7 @@ void gc_heap::count_plug (size_t last_plug_size, BYTE*& last_plug)
 
 void gc_heap::count_plugs_in_brick (BYTE* tree, BYTE*& last_plug)
 {
-    assert ((tree != 0));
+    assert ((tree != NULL));
     if (node_left_child (tree))
     {
         count_plugs_in_brick (tree + node_left_child (tree), last_plug);
@@ -28518,7 +28518,7 @@ void gc_heap::realloc_in_brick (BYTE* tree, BYTE*& last_plug,
                                 unsigned int& active_new_gen_number,
                                 BYTE*& last_pinned_gap, BOOL& leftp)
 {
-    assert (tree >= 0);
+    assert (tree != NULL);
     int   left_node = node_left_child (tree);
     int   right_node = node_right_child (tree);
 
@@ -30034,7 +30034,7 @@ BOOL gc_heap::ephemeral_gen_fit_p (gc_tuning_point tp)
     }
 }
 
-CObjectHeader* gc_heap::allocate_large_object (size_t jsize, __int64& alloc_bytes)
+CObjectHeader* gc_heap::allocate_large_object (size_t jsize, INT64& alloc_bytes)
 {
     //create a new alloc context because gen3context is shared.
     alloc_context acontext;
@@ -31551,7 +31551,7 @@ void gc_heap::descr_generations_to_profiler (gen_walk_fn fn, void *context)
                 assert (seg == hp->ephemeral_heap_segment);
                 assert (curr_gen_number0 <= max_generation);
                 //
-                if ((curr_gen_number0 == max_generation))
+                if (curr_gen_number0 == max_generation)
                 {
                     if (heap_segment_mem (seg) < generation_allocation_start (hp->generation_of (max_generation-1)))
                     {
@@ -33419,11 +33419,6 @@ void GCHeap::Relocate (Object** ppObject, ScanContext* sc,
     STRESS_LOG_ROOT_RELOCATE(ppObject, object, pheader, ((!(flags & GC_CALL_INTERIOR)) ? ((Object*)object)->GetGCSafeMethodTable() : 0));
 }
 
-/*static*/ BOOL GCHeap::IsLargeObject(MethodTable *mt)
-{
-    return mt->GetBaseSize() >= LARGE_OBJECT_SIZE;
-}
-
 /*static*/ BOOL GCHeap::IsObjectInFixedHeap(Object *pObj)
 {
     // For now we simply look at the size of the object to determine if it in the
@@ -34432,9 +34427,9 @@ void gc_heap::do_pre_gc()
     {
 #ifdef BACKGROUND_GC
         full_gc_counts[gc_type_background]++;
-#ifdef STRESS_HEAP
+#if defined(STRESS_HEAP) && !defined(FEATURE_REDHAWK)
         GCHeap::gc_stress_fgcs_in_bgc = 0;
-#endif // STRESS_HEAP
+#endif // STRESS_HEAP && !FEATURE_REDHAWK
 #endif // BACKGROUND_GC
     }
     else
@@ -35397,7 +35392,7 @@ void CFinalize::EnterFinalizeLock()
 {
     _ASSERTE(dbgOnly_IsSpecialEEThread() ||
              GetThread() == 0 ||
-             GetThread()->PreemptiveGCDisabled());
+             GCToEEInterface::IsPreemptiveGCDisabled(GetThread()));
 
 retry:
     if (FastInterlockExchange (&lock, 0) >= 0)
@@ -35424,7 +35419,7 @@ void CFinalize::LeaveFinalizeLock()
 {
     _ASSERTE(dbgOnly_IsSpecialEEThread() ||
              GetThread() == 0 ||
-             GetThread()->PreemptiveGCDisabled());
+             GCToEEInterface::IsPreemptiveGCDisabled(GetThread()));
 
 #ifdef _DEBUG
     lockowner_threadid = (DWORD) -1;
@@ -36204,7 +36199,7 @@ inline void testGCShadow(Object** ptr)
         // If you get this assertion, someone updated a GC poitner in the heap without
         // using the write barrier.  To find out who, check the value of 
         // dd_collection_count (dynamic_data_of (0)). Also
-        // note the value of 'ptr'.  Rerun the App that the previous GC just occured.
+        // note the value of 'ptr'.  Rerun the App that the previous GC just occurred.
         // Then put a data breakpoint for the value of 'ptr'  Then check every write
         // to pointer between the two GCs.  The last one is not using the write barrier.
 

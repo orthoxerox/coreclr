@@ -2,15 +2,18 @@
 
 usage()
 {
-    echo "Usage: $0 [BuildArch] [BuildType] [clean] [verbose] [cross] [clangx.y] [skipmscorlib]"
+    echo "Usage: $0 [BuildArch] [BuildType] [clean] [verbose] [coverage] [cross] [clangx.y] [skipcoreclr] [skipmscorlib] [skiptests]"
     echo "BuildArch can be: x64, ARM"
     echo "BuildType can be: Debug, Release"
     echo "clean - optional argument to force a clean build."
     echo "verbose - optional argument to enable verbose build output."
+    echo "coverage - optional argument to enable code coverage build (currently supported only for Linux and OSX)."
     echo "clangx.y - optional argument to build using clang version x.y."
     echo "cross - optional argument to signify cross compilation,"
     echo "      - will use ROOTFS_DIR environment variable if set."
+    echo "skipcoreclr - do not build CoreCLR."
     echo "skipmscorlib - do not build mscorlib.dll even if mono is installed."
+    echo "skiptests - skip the tests in the 'tests' subdirectory."
 
     exit 1
 }
@@ -55,14 +58,19 @@ check_prereqs()
 
 build_coreclr()
 {
+    if [ $__SkipCoreCLR == 1 ]; then
+        echo "Skipping CoreCLR build."
+        return
+    fi
+
     # All set to commence the build
 
     echo "Commencing build of native components for $__BuildOS.$__BuildArch.$__BuildType"
     cd "$__IntermediatesDir"
 
     # Regenerate the CMake solution
-    echo "Invoking cmake with arguments: \"$__ProjectRoot\" $__CMakeArgs"
-    "$__ProjectRoot/src/pal/tools/gen-buildsys-clang.sh" "$__ProjectRoot" $__ClangMajorVersion $__ClangMinorVersion $__BuildArch $__CMakeArgs
+    echo "Invoking cmake with arguments: \"$__ProjectRoot\" $__BuildType $__CodeCoverage"
+    "$__ProjectRoot/src/pal/tools/gen-buildsys-clang.sh" "$__ProjectRoot" $__ClangMajorVersion $__ClangMinorVersion $__BuildArch $__BuildType $__CodeCoverage $__IncludeTests
 
     # Check that the makefiles were created.
 
@@ -75,9 +83,9 @@ build_coreclr()
     # Other techniques such as `nproc` only get the number of
     # processors available to a single process.
     if [ `uname` = "FreeBSD" ]; then
-	NumProc=`sysctl hw.ncpu | awk '{ print $2+1 }'`
+        NumProc=`sysctl hw.ncpu | awk '{ print $2+1 }'`
     else
-	NumProc=$(($(getconf _NPROCESSORS_ONLN)+1))
+        NumProc=$(($(getconf _NPROCESSORS_ONLN)+1))
     fi
 
     # Build CoreCLR
@@ -99,6 +107,9 @@ build_mscorlib()
         echo "Skipping mscorlib.dll build."
         return
     fi
+
+    # Temporary hack to make dnu restore more reliable. This is specifically for dnu beta 5 since this issue should already be addressed in later versions of dnu.
+    export MONO_THREADS_PER_CPU=2000
 
     echo "Commencing build of mscorlib components for $__BuildOS.$__BuildArch.$__BuildType"
 
@@ -133,8 +144,26 @@ build_mscorlib()
         fi
     fi
 
+    # Set _ToolNugetRuntimeId
+    case $__BuildOS in
+        Linux)
+            _ToolNugetRuntimeId=ubuntu.14.04-x64
+            ;;
+        OSX)
+            _ToolNugetRuntimeId=osx.10.10-x64
+            ;;
+        *)
+            _ToolNugetRuntimeId=ubuntu.14.04-x64
+            ;;
+    esac
+
     # Invoke MSBuild
-    mono "$__MSBuildPath" /nologo "$__ProjectRoot/build.proj" /verbosity:minimal "/fileloggerparameters:Verbosity=normal;LogFile=$__LogsDir/MSCorLib_$__BuildOS__$__BuildArch__$__BuildType.log" /t:Build /p:OSGroup=$__BuildOS /p:BuildOS=$__BuildOS /p:BuildArch=$__MSBuildBuildArch /p:UseRoslynCompiler=true /p:BuildNugetPackage=false
+    mono "$__MSBuildPath" /nologo "$__ProjectRoot/build.proj" /verbosity:minimal "/fileloggerparameters:Verbosity=normal;LogFile=$__LogsDir/MSCorLib_$__BuildOS__$__BuildArch__$__BuildType.log" /t:Build /p:__BuildOS=$__BuildOS /p:__BuildArch=$__MSBuildBuildArch /p:__BuildType=$__BuildType /p:__IntermediatesDir=$__IntermediatesDir /p:UseRoslynCompiler=true /p:BuildNugetPackage=false /p:ToolNugetRuntimeId=$_ToolNugetRuntimeId
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to build mscorlib."
+        exit 1
+    fi
 }
 
 echo "Commencing CoreCLR Repo build"
@@ -179,7 +208,8 @@ case $OSName in
 esac
 __MSBuildBuildArch=x64
 __BuildType=Debug
-__CMakeArgs=DEBUG
+__CodeCoverage=
+__IncludeTests=Include_Tests
 
 # Set the various build properties here so that CMake and MSBuild can pick them up
 __ProjectDir="$__ProjectRoot"
@@ -189,6 +219,7 @@ __RootBinDir="$__ProjectDir/bin"
 __LogsDir="$__RootBinDir/Logs"
 __UnprocessedBuildArgs=
 __MSBCleanBuildArgs=
+__SkipCoreCLR=false
 __SkipMSCorLib=false
 __CleanBuild=false
 __VerboseBuild=false
@@ -225,7 +256,9 @@ for i in "$@"
         ;;
         release)
         __BuildType=Release
-        __CMakeArgs=RELEASE
+        ;;
+        coverage)
+        __CodeCoverage=Coverage
         ;;
         clean)
         __CleanBuild=1
@@ -248,8 +281,16 @@ for i in "$@"
         __ClangMajorVersion=3
         __ClangMinorVersion=7
         ;;
+        skipcoreclr)
+        __SkipCoreCLR=1
+        ;;
         skipmscorlib)
         __SkipMSCorLib=1
+        ;;
+        includetests)
+        ;;
+        skiptests)
+        __IncludeTests=
         ;;
         *)
         __UnprocessedBuildArgs="$__UnprocessedBuildArgs $i"
@@ -275,7 +316,7 @@ fi
 
 # Configure environment if we are doing a verbose build
 if [ $__VerboseBuild == 1 ]; then
-	export VERBOSE=1
+    export VERBOSE=1
 fi
 
 # Configure environment if we are doing a cross compile.
