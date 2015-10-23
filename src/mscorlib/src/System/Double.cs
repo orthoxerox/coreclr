@@ -250,6 +250,25 @@ namespace System {
         private static double Parse(String s, NumberStyles style, NumberFormatInfo info) {
             return Number.ParseDouble(s, style, info);
         }
+        
+        public static double? TryParse(String s) {
+            double result;
+            if (TryParse(s, NumberStyles.Float| NumberStyles.AllowThousands, NumberFormatInfo.CurrentInfo, out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
+        
+        public static double? TryParse(String s, NumberStyles style, IFormatProvider provider) {
+            NumberFormatInfo.ValidateParseStyleFloatingPoint(style);
+            double result;
+            if (TryParse(s, style, NumberFormatInfo.GetInstance(provider), out result)) {
+                return result;
+            } else {
+                return null;
+            }
+        }
 
         public static bool TryParse(String s, out double result) {
             return TryParse(s, NumberStyles.Float| NumberStyles.AllowThousands, NumberFormatInfo.CurrentInfo, out result);
